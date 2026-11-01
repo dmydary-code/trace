@@ -58,13 +58,14 @@ export function numberLines(lines,old=1,newLine=1){return lines.map(raw=>{
  return {kind,text:raw.slice(1),old:kind==='add'?null:old++,new:kind==='del'?null:newLine++};
 });}
 export function parseDiff(diff) {
- const files=[];let file=null,old=0,newLine=0;
+ const files=[];let file=null,old=0,newLine=0,inHunk=false;
+ const path=raw=>{let value=raw.trimEnd();if(value.startsWith('"')){try{value=JSON.parse(value)}catch{}}return value.replace(/^[ab]\//,'')};
  for(const line of diff.split('\n')){
-  if(line.startsWith('diff --git ')){file={id:`file-${files.length}`,path:'',lines:[]};files.push(file);}
-  else if(file&&line.startsWith('--- ')){file.oldPath=line.slice(4).replace(/^a\//,'');}
-  else if(file&&line.startsWith('+++ ')){file.path=line.slice(4)==='/dev/null'?file.oldPath:line.slice(4).replace(/^b\//,'');}
-  else if(file&&line.startsWith('@@ ')){const m=line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);if(m){old=+m[1];newLine=+m[2];file.lines.push({kind:'hunk',text:line});}}
-  else if(file&&/^[ +\-]/.test(line)&&file.path){const kind=line[0]==='+'?'add':line[0]==='-'?'del':'context';file.lines.push({kind,text:line.slice(1),old:kind==='add'?null:old++,new:kind==='del'?null:newLine++});}
+  if(line.startsWith('diff --git ')){file={id:`file-${files.length}`,path:'',lines:[]};files.push(file);inHunk=false;}
+  else if(file&&line.startsWith('@@ ')){const m=line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);if(m){old=+m[1];newLine=+m[2];inHunk=true;file.lines.push({kind:'hunk',text:line});}}
+  else if(file&&inHunk&&/^[ +\-]/.test(line)){const kind=line[0]==='+'?'add':line[0]==='-'?'del':'context';file.lines.push({kind,text:line.slice(1),old:kind==='add'?null:old++,new:kind==='del'?null:newLine++});}
+  else if(file&&!inHunk&&line.startsWith('--- ')){file.oldPath=path(line.slice(4));}
+  else if(file&&!inHunk&&line.startsWith('+++ ')){file.path=line.slice(4)==='/dev/null'?file.oldPath:path(line.slice(4));}
  }
  return files.filter(f=>f.path&&f.lines.length);
 }

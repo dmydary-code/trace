@@ -1,10 +1,10 @@
 # Review route design
 
-A route is a reading order over the changed files, not a replacement directory layout. Separate three decisions: platform, stack, and review preset. Framework recognition supplies clues; the review preset supplies ordering. Keep unknown files visible and allow correction.
+A route is a reading order over the changed files, not a replacement directory layout. Infer platform, framework, and reading order from repository evidence. Users choose only Files or Change route. Framework recognition supplies clues, and package boundaries keep different stacks separate. Unknown files remain visible.
 
 ## Frontend
 
-| Stack | Proposed route | Adapter requirements beyond this prototype |
+| Stack | Proposed route | Future semantic adapter requirements |
 | --- | --- | --- |
 | React | Data/API → hooks and state → components/styles → pages/navigation → tests | Resolve imports, hooks, context/store use, and JSX props. Next.js server/client boundaries need their own adapter. |
 | Vue | Data/API → composables/stores → components/styles → views/router → tests | Parse SFC script/template/style, props/emits, composables and store usage; handle Options API as well as Composition API. |
@@ -12,7 +12,7 @@ A route is a reading order over the changed files, not a replacement directory l
 
 Do not infer the whole architecture from folder names. Angular's current style guide recommends grouping by feature and avoiding generic component/service directory buckets. Vue can place several responsibilities in one SFC. React does not make a particular repository folder structure a prerequisite. Therefore, a fixed folder-to-layer table is only a first approximation.
 
-The prototype includes distinct sample diffs and framework-specific labels plus convention-based suggestions. Full framework support requires syntax and dependency adapters; selecting a framework in the UI does not provide those capabilities.
+The local tool detects manifests and framework-specific source signals per package, then orders real diffs by conventions. There is no framework selector. Full semantic support still requires syntax and dependency adapters.
 
 Sources: [Angular style guide](https://angular.dev/style-guide), [Vue composables](https://vuejs.org/guide/reusability/composables), [Vue state management](https://vuejs.org/guide/scaling-up/state-management), [Thinking in React](https://react.dev/learn/thinking-in-react).
 
@@ -37,14 +37,14 @@ MVVM describes presentation responsibilities: Model, View, ViewModel. It is not 
 - State-holder focus: models/contracts → data/repositories → optional use cases → screen state/ViewModel → screens/navigation → tests.
 - Event-flow focus: models/contracts → data/repositories → actions/reducers → screen state → screens/navigation → tests.
 
-The prototype provides Kotlin, Swift and Dart examples. Missing layers are omitted. A small screen should not acquire a fake use-case layer simply to fill a template. Kotlin lifecycle/Flow, Swift observation/actor isolation, and Flutter notifier/BLoC conventions require separate semantic adapters. The current path heuristics do not validate those behaviors.
+The local tool recognizes Android, SwiftUI/UIKit and Flutter signals. Missing layers are omitted. A small screen should not acquire a fake use-case layer simply to fill a template. Kotlin lifecycle/Flow, Swift observation/actor isolation, and Flutter notifier/BLoC conventions require separate semantic adapters. The current path heuristics do not validate those behaviors.
 
 Sources: [Android architecture](https://developer.android.com/topic/architecture), [Android optional domain layer](https://developer.android.com/topic/architecture/domain-layer), [Flutter architecture and MVVM](https://docs.flutter.dev/app-architecture/guide).
 
 ## Implementation sequence
 
-1. Current: explicit stack/preset selection, convention-based classification, manual override, continuous diff and accurate line comments.
-2. Next: detect manifests per package, parse TypeScript/JSX, Vue SFCs and Angular templates/decorators; retain confidence and evidence for each role.
+1. Current: automatic per-package detection, convention-based classification, continuous real Git diffs, validated line comments, and same-session agent feedback.
+2. Next: parse TypeScript/JSX, Vue SFCs and Angular templates/decorators; retain calibrated confidence and evidence for each role.
 3. Then: group by feature, build dependency edges and topologically order changes. Handle cycles as groups and keep unknowns visible.
 4. Expand backend/mobile syntax adapters using real repositories and labeled review fixtures. Evaluate misclassifications before advertising full support.
 5. Preserve and re-anchor comments across revisions using file identity and code context; report ambiguous matches rather than silently moving feedback.

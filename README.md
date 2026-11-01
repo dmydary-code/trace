@@ -1,61 +1,87 @@
 # Trace
 
-A code review workspace with a file tree, continuous diffs, inline feedback, and an optional change route.
+Review local Git changes in a browser, leave comments on exact lines, and send the feedback back to the coding agent working on your project.
 
-## Features
-
-- **Files:** navigate the changed-file tree, search paths, and mark files as viewed.
-- **Change route:** read every changed file in responsibility order instead of directory order. Change a suggested layer per file; empty layers disappear.
-- **Inline review:** add, edit, resolve, reopen, and delete comments on old or new lines. Drafts and review state persist in this browser, scoped to the revision.
-- **Agent handoff:** copy a task, download structured JSON, or run Codex through the local companion server.
-- **Light and dark themes.**
-- **Stack presets:** React, Vue, Angular; TypeScript/NestJS, Python/FastAPI, Java/Spring; Kotlin/Android, Swift/iOS, Dart/Flutter.
-
-## Preview sample changes
-
-Requires Node.js 20+ for the local server and tests. The static demo has no build step or dependencies:
+## Install with Homebrew
 
 ```sh
-python3 -m http.server 4174 --directory dist
+brew tap dmydary-code/trace https://github.com/dmydary-code/trace.git
+brew install dmydary-code/trace/trace
+trace install all
 ```
 
-Open http://127.0.0.1:4174. Use the project and stack selectors to change the sample diff. Sample snippets illustrate review interactions; they are not complete, runnable applications.
+The repository is currently private. Your Git client needs access to `dmydary-code/trace`; authenticate GitHub before adding the tap. The formula installs the CLI and bundled plugin definitions. `trace install all` registers the plugin with both installed agents using their native plugin commands. Use `trace install codex` or `trace install claude` to install just one integration. Install and authenticate the agents separately.
 
-## Review a real repository
+Restart the agent after installation. In Claude Code, invoke `/trace:review`. In Codex, select Trace's `review` skill from the skill picker, or ask “Use Trace to review my changes.” Run the agent inside the project you want to review.
+
+## Agent review loop
+
+1. The agent runs `trace review --wait --json --no-open` in the project and shows the local URL.
+2. Review the actual Git diff. Switch between **Files** and **Change route**, search files, and mark them viewed.
+3. Click **+** beside an old or new line to write feedback. Open **Send to agent** and submit the review.
+4. The waiting command returns the structured feedback to the same agent conversation. That agent applies the requested edits using its existing context and permissions.
+
+A review can also finish without requested changes or be cancelled. Neither outcome authorizes a commit, merge, push, or deployment. Closing the browser does not submit a review.
+
+The normal loop does not start another model, require an API key, or upload code. The existing agent handles the returned feedback under its own settings. Trace stores submitted reviews in the current worktree's Git metadata directory under `trace/`; these files are outside the project working tree.
+
+## Standalone CLI
 
 ```sh
-node server.mjs --repo /absolute/path/to/repository
+cd /path/to/project
+trace                           # Open working-tree changes against HEAD
+trace --staged                  # Staged changes only
+trace --base origin/main --merge-base  # Branch/MR-style baseline
+trace --repo /path/to/project --no-open
+trace feedback --json           # Retrieve the latest submitted review
+trace doctor                    # Check Git, repository, and installed agents
 ```
 
-Open the printed localhost URL. By default, Trace displays tracked staged and unstaged changes against the HEAD resolved at server startup. Use `--base main` to compare against another local ref. This is a direct tree comparison, not a merge-base PR diff. Untracked files, binary changes, and rename-only/mode-only changes are not shown yet.
+`--base REF` resolves and freezes the baseline at startup. Without `--merge-base`, it is a direct tree comparison. Working-tree review includes staged, unstaged, and untracked non-ignored files. `--staged` excludes unstaged/untracked changes. Remote refs must already be fetched; Trace never fetches or modifies Git's index.
 
-## Send changes to an agent
+Renames, deletions, binary files, empty files, and mode changes remain visible. Binary files have no line comments. Untracked text previews larger than 1 MiB are summarized. Symlink previews show their target without reading the target file. Large tracked diffs over the 32 MiB process limit produce an error instead of silently disappearing.
 
-Install and authenticate Codex CLI separately. Enable its local adapter explicitly:
+For automation, `--wait --json` prints newline-delimited events: `ready` with the URL/session ID, then `feedback` with outcome, revision, anchors, instructions, and saved review path. It exits after submission. The default timeout is 1800 seconds; set `--timeout 0` for no limit. Exit codes: 0 submitted, 1 error, 2 timeout, 3 cancelled, 130 interrupted. Match the `sessionId` when recovering a result with `trace feedback` so old feedback is not mistaken for a new submission.
+
+Each server accepts one submission. Start a new review after the agent edits the code. Browser drafts are scoped by repository and revision; changed revisions do not automatically inherit old line anchors. The OS chooses an available loopback port unless `--port` is provided; browser draft storage is also scoped to that origin.
+
+### Optional separate agent
 
 ```sh
-node server.mjs --repo /absolute/path/to/repository --agent codex
+trace --agent codex
 ```
 
-1. Click **+** beside a line and add feedback.
-2. Open **Send to agent**, inspect the comments and optional instructions.
-3. Click **Send to Codex**. This starts `codex exec` in that repository with the `workspace-write` sandbox, passing the task through stdin.
-4. Read the completion or failure status, then **Refresh diff** to inspect the result.
+This explicitly starts a separate `codex exec` process on submission with the `workspace-write` sandbox. It is independent of the calling conversation and cannot be combined with `--wait`. The Codex and Claude plugins use the same-session feedback loop instead.
 
-The agent can edit repository files. It is instructed not to commit or push. Only one job runs at a time; stale review revisions are rejected. Jobs and results are written to the repository's Git metadata directory under `trace/`. Reviews for old revisions remain in browser storage, but are not automatically re-anchored or carried into the new diff.
+## Automatic change routes
 
-The hosted demo cannot access your local repository or run your local agent. It provides task copy/JSON export. The local server binds to loopback and checks Host, Origin, and a per-process request token before starting jobs.
+There are no project, stack, or architecture selectors. Trace uses nearby package manifests, file extensions, imports, decorators, and path conventions to identify each changed file's role. Monorepository packages can have different stacks in one review.
 
-## How route suggestions work
+Supported signals include React, Vue, Angular; NestJS, FastAPI, Spring; Android, SwiftUI/UIKit, and Flutter. Backend routes default to contract → implementation → consumers → tests. Clean/hexagonal and event-flow reading orders require multiple matching roles. Mobile routing recognizes state holders and reducer/action conventions. Unknown or ambiguous files remain visible under **Other changes**.
 
-The current implementation uses path/name conventions and a few text cues from the diff, with manual overrides. It does not parse ASTs, resolve imports, infer the project's architecture, or build a call graph. A Vue SFC remains one file; Angular component/template/style files remain separate cards within the same layer. Unrecognized files stay visible under **Other changes**.
+These are heuristic reading suggestions, not AST resolution, a dependency graph, or proof of architecture. Detection currently reads package manifests from the working tree, including during staged review. MVVM and unidirectional data flow can coexist; reading order does not enforce a single architecture. See [the route analysis](docs/review-routes.md).
 
-Review presets are reading lenses, not mutually exclusive architectural classifications. MVVM can coexist with UDF, and an event-driven service can also use Clean Architecture. See [the architecture analysis](docs/review-routes.md) for decisions, sources, and the next implementation stages.
+## Local behavior
 
-## Validation
+Trace binds only to `127.0.0.1`. Review submission requires the matching Host, Origin, and per-session token. The server rechecks the Git revision and line anchors before accepting feedback. It does not serve arbitrary repository files or execute repository scripts. Refresh the diff if code changes during review.
+
+Framework detection reads manifests; it never runs package install hooks. Review comments and source snippets are escaped in the browser. The CLI itself does not edit project files. Agent edits happen only after review feedback is submitted to that agent.
+
+## Development and validation
+
+Requires Node.js 20+ and Git. Runtime has no npm dependencies and no build step.
 
 ```sh
-node --test tests/*.test.mjs
+node bin/trace.mjs --repo /path/to/project
+npm test
+claude plugin validate plugins/trace
+claude plugin validate .
 ```
 
-Tests cover route order, classification, diff anchors, and local agent transport with a fixture executable. They do not invoke a real model or validate generated code.
+Tests exercise actual temporary Git repositories, diff anchors, automatic package detection, stale and duplicate feedback rejection, persisted reviews, same-process CLI handoff, and the optional Codex adapter with a fixture executable. They do not call a live model.
+
+## Distribution maintenance
+
+The repository doubles as a Homebrew tap. `Formula/trace.rb` pins a release tag and Git revision. Plugin marketplaces for Codex and Claude Code are bundled with the CLI. After `brew upgrade`, run `trace install all` again to refresh the agent's cached skill, then restart the agent.
+
+Plugin formats follow the [Codex plugin packaging documentation](https://developers.openai.com/plugins/build/plugins) and [Claude Code plugin reference](https://code.claude.com/docs/en/plugins-reference). Homebrew distribution follows the [tap documentation](https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap).

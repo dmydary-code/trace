@@ -1,0 +1,10 @@
+{
+  "name": "trace-tools",
+  "interface": { "displayName": "Trace" },
+  "plugins": [{
+    "name": "trace",
+    "source": { "source": "local", "path": "./plugins/trace" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Developer Tools"
+  }]
+}

@@ -1,4 +1,4 @@
-import {numberLines} from './core.mjs';
+import {numberLines} from '../../dist/core.mjs';
 const file=(path,lines)=>({id:'f-'+path.replace(/[^a-z0-9]/gi,'-'),path,lines:numberLines(lines)});
 export const demos={
 backend:[

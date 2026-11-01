@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {classify,orderedFiles,parseDiff,reviewPrompt} from '../dist/core.mjs';
-import {demos} from '../dist/demo.mjs';
+import {demos} from './fixtures/demo.mjs';
 test('route reorders files by responsibility and keeps every file',()=>{
  const source=demos.backend;const routed=orderedFiles(source,'backend','route');
  assert.deepEqual(routed.map(f=>f.path),['contracts/checkout.ts','services/checkout.ts','controllers/checkout.ts','tests/checkout.test.ts']);

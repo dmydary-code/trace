@@ -1,0 +1,9 @@
+{
+  "name": "trace",
+  "version": "0.1.0",
+  "description": "Review local Git changes in a browser and return line feedback to the current coding agent.",
+  "skills": "./skills/",
+  "author": {
+    "name": "dmydary-code"
+  }
+}
