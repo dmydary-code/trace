@@ -10,7 +10,7 @@ brew install dmydary-code/trace/trace
 trace install all
 ```
 
-The repository is currently private. Your Git client needs access to `dmydary-code/trace`; authenticate GitHub before adding the tap. The formula installs the CLI and bundled plugin definitions. `trace install all` registers the plugin with both installed agents using their native plugin commands. Use `trace install codex` or `trace install claude` to install just one integration. Install and authenticate the agents separately.
+The repository is currently private. Your Git client needs access to `dmydary-code/trace`. Before adding the tap, authenticate with `gh auth login` and configure Git with `gh auth setup-git --hostname github.com`. This also lets Homebrew fetch the private release source without an interactive password prompt. The formula installs the CLI and bundled plugin definitions. `trace install all` registers the plugin with both installed agents using their native plugin commands. Use `trace install codex` or `trace install claude` to install just one integration. Install and authenticate the agents separately.
 
 Restart the agent after installation. In Claude Code, invoke `/trace:review`. In Codex, select Trace's `review` skill from the skill picker, or ask “Use Trace to review my changes.” Run the agent inside the project you want to review.
 
