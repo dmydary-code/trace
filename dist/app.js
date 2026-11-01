@@ -1,4 +1,4 @@
-import {reviewPrompt} from './core.mjs';
+import {reviewPrompt, changeSections} from './core.mjs';
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
@@ -6,22 +6,59 @@ const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 const local = document.documentElement.dataset.traceLocal === 'true';
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
-const key = () => session ? `${session.repositoryId}:${session.revision}` : 'disconnected';
+const key = () => session ? `${session.repositoryId}:${session.verifying && activeReview ? activeReview.revision : session.revision}` : 'disconnected';
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
 const files = () => session?.files || [];
 function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Export your review.'); } }
 function toast(message) { $('#toast').textContent = message; $('#toast').style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').style.display = 'none', 4000); }
 function applyTheme() { document.documentElement.dataset.theme = state.theme; $('#theme').textContent = state.theme === 'dark' ? '☀' : '☾'; $('#theme').setAttribute('aria-label', state.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'); }
+const icons = {
+ file: '<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/>',
+ contract: '<rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+ data: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/>',
+ state: '<path d="M5 4v16M12 4v16M19 4v16M2 8h6M9 16h6M16 10h6"/>',
+ component: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+ page: '<rect x="3" y="5" width="18" height="15" rx="3"/><path d="M7 2h10M3 10h18"/>',
+ test: '<path d="M9 3h6M10 3v6L4 19q-1 2 2 2h12q3 0 2-2L14 9V3M8 15h8"/>',
+ code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18"/>',
+ flow: '<circle cx="5" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><path d="M5 7v10M7 5h2c6 0 2 7 8 7"/>',
+ screen: '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/>'
+};
+const icon = name => `<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.file}</svg>`;
+function layerIcon(layer) {
+  if (/Tests/.test(layer)) return 'test';
+  if (/contracts?|Contract|Domain|Models/.test(layer)) return 'contract';
+  if (/Data|API|repositories|infrastructure|Transport/.test(layer)) return 'data';
+  if (/state|stores|Composables|Hooks/.test(layer)) return 'state';
+  if (/Components/.test(layer)) return 'component';
+  if (/Screens/.test(layer)) return 'screen';
+  if (/Pages|Entry/.test(layer)) return 'page';
+  if (/Consumers|Producers|Actions/.test(layer)) return 'flow';
+  if (/Implementation|Use cases/.test(layer)) return 'code';
+  return 'file';
+}
 const lineKey = (path, index) => `${path}:${index}`;
 function tree() {
-  // Maps avoid confusing directory names such as "path" with a file object.
-  const root = new Map();
-  for (const f of files().filter(f => f.path.toLowerCase().includes(query))) {
-    let node = root; const parts = f.path.split('/');
-    parts.forEach((part, i) => { if (i === parts.length - 1) node.set(part, f); else { if (!node.has(part)) node.set(part, new Map()); node = node.get(part); } });
+  const fileLink = (f, label) => `<button class="file-link ${f.path === activePath ? 'active' : ''}" data-file="${esc(f.id)}" title="${esc(f.path)}">${icon('file')}<span class="name">${esc(label)}</span><span class="status">${review().done.includes(f.path) ? '✓' : esc(f.status || 'M')}</span></button>`;
+  $('#sidebar-heading').textContent = state.mode === 'route' ? 'Change route' : 'Changed files';
+  if (state.mode === 'route') {
+    const sections = changeSections(files(), query), groups = new Set(sections.map(s => s.group)); let lastGroup;
+    $('#tree').innerHTML = sections.map(section => {
+      const groupLabel = groups.size > 1 && section.group !== lastGroup ? `<div class="route-package">${esc(section.group)}</div>` : '';
+      lastGroup = section.group;
+      return groupLabel + `<div class="route-group"><a class="route-stage ${section.files.some(f => f.path === activePath) ? 'active' : ''}" href="#${section.id}">${icon(layerIcon(section.layer))}<span>${esc(section.layer)}</span><small>${section.files.length}</small></a><div class="route-files">${section.files.map(f => fileLink(f, f.path)).join('')}</div></div>`;
+    }).join('') || '<p>No matching files</p>';
+  } else {
+    // Maps avoid confusing directory names such as "path" with a file object.
+    const root = new Map();
+    for (const f of files().filter(f => f.path.toLowerCase().includes(query))) {
+      let node = root; const parts = f.path.split('/');
+      parts.forEach((part, i) => { if (i === parts.length - 1) node.set(part, f); else { if (!node.has(part)) node.set(part, new Map()); node = node.get(part); } });
+    }
+    const branch = node => [...node].sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => value instanceof Map ? `<details open><summary>${esc(name)}</summary><div>${branch(value)}</div></details>` : fileLink(value, name)).join('');
+    $('#tree').innerHTML = branch(root) || '<p>No matching files</p>';
   }
-  const branch = node => [...node].sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => value instanceof Map ? `<details open><summary>${esc(name)}</summary><div>${branch(value)}</div></details>` : `<button class="file-link ${value.path === activePath ? 'active' : ''}" data-file="${esc(value.id)}" title="${esc(value.path)}"><span>⌘</span><span class="name">${esc(name)}</span><span class="status">${review().done.includes(value.path) ? '✓' : esc(value.status || 'M')}</span></button>`).join('');
-  $('#tree').innerHTML = branch(root) || '<p>No matching files</p>'; $('#file-count').textContent = files().length;
+  $('#file-count').textContent = files().length;
 }
 const replyLabels = {addressed: 'Addressed', needs_input: 'Needs input', not_changed: 'Not changed', note: 'Note'};
 function replies(id) {
@@ -39,22 +76,25 @@ function syncSubmitted(data) {
   const sentIds = new Set(data.comments.map(c => c.id));
   review().comments = [...data.comments.map(c => ({...c, resolved: previous.get(c.id)?.resolved || false})), ...review().comments.filter(c => !sentIds.has(c.id))];
   persist();
+  $('#instruction').disabled = true;
   $('#refresh').hidden = true;
   $('#review-status').hidden = false;
-  $('#review-status-text').textContent = data.outcome === 'changes_requested' ? 'Review submitted · showing the reviewed revision. Agent replies appear in each thread. Open a new review to inspect the updated code.' : data.outcome === 'approved' ? 'Review finished without requested changes.' : 'Review cancelled.';
+  $('#review-status-text').textContent = data.completion || data.outcome === 'approved' ? 'Review approved. Original comments and agent replies are saved below.' : data.outcome === 'changes_requested' ? 'Review submitted. Follow agent replies here, then review the latest changes and approve.' : 'Review cancelled.';
+  $('#reply-connection').textContent = data.completion || data.outcome === 'approved' ? 'Approval saved locally. It does not merge or commit changes.' : data.outcome === 'cancelled' ? 'No approval was recorded.' : 'Agent replies update automatically.';
   $('#general-thread').hidden = !data.instruction;
   $('#general-instruction').textContent = data.instruction;
   $('#general-replies').innerHTML = replies('review');
-  startReplies();
+  completionButtons(); startReplies();
 }
 function startReplies() {
   clearInterval(replyTimer);
-  if (!activeReview || activeReview.outcome !== 'changes_requested') return;
+  if (!activeReview || activeReview.outcome !== 'changes_requested' || activeReview.completion) return;
   replyTimer = setInterval(async () => {
     try {
       const response = await fetch('/api/reviews/' + activeReview.id);
       if (!response.ok) throw new Error('Viewer unavailable');
       const data = await response.json();
+      if (data.completion && !activeReview.completion) { syncSubmitted(data); render(); return; }
       if (JSON.stringify(data.replies) !== JSON.stringify(activeReview.replies)) {
         activeReview = data;
         for (const node of document.querySelectorAll('[data-replies]')) node.innerHTML = replies(node.dataset.replies);
@@ -68,21 +108,20 @@ function startReplies() {
 function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 function fileCard(f) {
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div>${state.mode === 'route' ? `<span class="footnote" title="${esc(f.route.evidence)}">${esc(f.route.layer)}</span>` : ''}<label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div>${state.mode === 'route' ? `<span class="footnote" title="${esc(f.route.evidence)}">${esc(f.route.layer)}</span>` : ''}<label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
-  const list = files().filter(f => f.path.toLowerCase().includes(query)).sort((a, b) => (state.mode === 'route' ? a.route.group.localeCompare(b.route.group) || a.route.rank - b.route.rank : 0) || a.path.localeCompare(b.path));
-  const groups = new Set(list.map(f => f.route.group)); let last = '', section = 0; const links = [];
-  $('#feed').innerHTML = list.map(f => { let heading = ''; const group = `${f.route.group}:${f.route.layer}`;
-    if (state.mode === 'route' && group !== last) { last = group; section++; const label = (groups.size > 1 ? f.route.group + ' / ' : '') + f.route.layer; links.push({label, id: `layer-${section}`}); heading = `<div class="layer-heading" id="layer-${section}"><b>${section}</b><h2>${esc(label)}</h2></div>`; }
-    return heading + fileCard(f);
-  }).join('') || `<div class="empty">${session ? 'No changes to display' : local ? 'Connecting to your repository…' : 'Run <code>trace-review</code> inside your Git repository to open a local review.'}</div>`;
-  $('#route-links').innerHTML = links.map(l => `<a href="#${l.id}">${esc(l.label)}</a>`).join('<span>→</span>');
+  const sections = changeSections(files(), query), groups = new Set(sections.map(s => s.group));
+  const list = state.mode === 'route' ? sections.flatMap(s => s.files) : files().filter(f => f.path.toLowerCase().includes(query)).sort((a,b) => a.path.localeCompare(b.path));
+  const label = section => (groups.size > 1 ? section.group + ' / ' : '') + section.layer;
+  const cards = state.mode === 'route' ? sections.map((section, i) => `<div class="layer-heading" id="${section.id}"><b>${i+1}</b><h2>${esc(label(section))}</h2></div>` + section.files.map(fileCard).join('')).join('') : list.map(fileCard).join('');
+  $('#feed').innerHTML = cards || `<div class="empty">${session ? 'No changes to display' : local ? 'Connecting to your repository…' : 'Run <code>trace-review</code> inside your Git repository to open a local review.'}</div>`;
+  $('#route-links').innerHTML = sections.map(section => `<a href="#${section.id}">${esc(label(section))}</a>`).join('<span>→</span>');
   $('#route-explanation').textContent = list.some(f => f.route.layer !== 'Other changes') ? 'The same diff, grouped by package and responsibility. Follow the stages below; files inside each stage stay in path order. Roles are inferred from manifests, imports and naming conventions, not a call graph.' : 'No supported framework or file role was identified in these changes. All files stay visible under Other changes, in path order. Change route will look similar to Files for this diff.';
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'route'); $('#route-info').hidden = state.mode !== 'route'; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); }
+function render() { applyTheme(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'route'); $('#route-info').hidden = state.mode !== 'route'; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); completionButtons(); }
 function jump(id) { const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -108,7 +147,7 @@ for (const mode of ['files', 'route']) $('#' + mode + '-mode').onclick = () => {
 function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; $('#download').disabled = !hasFeedback; }
-$('#review').onclick = () => {
+function openReview() {
   const p = packet();
   $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
   $('#handoff-help').textContent = 'Only open comments from this revision are sent. If the code changes, refresh the diff before submitting.';
@@ -116,6 +155,7 @@ $('#review').onclick = () => {
   $('#instruction').value = review().instruction; $('#send').hidden = false; $('#approve').hidden = false; $('#cancel-review').hidden = false;
   $('#send').textContent = session.agent ? 'Send to Codex ↗' : 'Send to agent ↗'; dialogButtons(); $('#handoff').showModal();
 };
+$('#review').onclick = openReview;
 $('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Download the JSON task instead.'); } };
@@ -126,7 +166,7 @@ async function send(outcome) {
     const response = await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify(packet(outcome))});
     const job = await response.json(); if (!response.ok) throw new Error(job.error);
     syncSubmitted({...job.review, replies: []}); render();
-    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : session.handoff === 'waiting-agent' ? 'Review delivered. Close this dialog to follow agent replies in your comment threads.' : 'Review saved. Your agent can read it with trace-review feedback --json and reply to each thread.'; dialogButtons(); return; }
+    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : outcome === 'approved' ? 'Review approved. You can close this dialog.' : session.handoff === 'waiting-agent' ? 'Review delivered. Close this dialog to follow agent replies in your comment threads.' : 'Review saved. Your agent can read it with trace-review feedback --json and reply to each thread.'; dialogButtons(); return; }
     $('#job-state').textContent = 'Codex is working…';
     jobTimer = setInterval(async () => { try {
       const res = await fetch('/api/jobs/' + job.id); if (!res.ok) throw new Error('Could not retrieve job status'); const j = await res.json();
@@ -142,7 +182,7 @@ async function loadSession() {
     const next = await res.json(); if (next.sessionId !== session?.sessionId) submitted = false; session = next;
     $('#repo').textContent = session.repo; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
     $('#detected').textContent = [...new Set(files().map(f => f.route.group).filter(g => g !== 'Other changes'))].join(' · ') || 'Automatic route';
-    clearInterval(replyTimer); activeReview = null; submitted = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
+    clearInterval(replyTimer); activeReview = null; submitted = false; $('#instruction').disabled = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
     $('#refresh').hidden = false; editor = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
     render();
@@ -150,3 +190,46 @@ async function loadSession() {
 }
 $('#refresh').onclick = () => loadSession();
 render(); if (local) loadSession();
+
+function completionButtons() {
+  const canFinish = activeReview?.outcome === 'changes_requested' && !activeReview.completion;
+  for (const selector of ['#approve-top', '#approve-end']) {
+    $(selector).disabled = !session || submitted && !canFinish;
+    $(selector).textContent = activeReview?.completion || activeReview?.outcome === 'approved' ? 'Approved ✓' : 'Approve';
+  }
+  $('#verify-latest').hidden = !canFinish;
+  $('#verify-latest').textContent = session?.verifying ? 'Refresh latest changes' : 'Review latest changes';
+  $('#back-to-threads').hidden = !session?.verifying;
+  $('#approve-final').hidden = !canFinish;
+}
+async function verifyLatest() {
+  try {
+    const response = await fetch(`/api/reviews/${activeReview.id}/current`);
+    const data = await response.json(); if (!response.ok) throw new Error(data.error);
+    session = data; editor = null; editId = null;
+    $('#review-status-text').textContent = 'Latest changes · inspect this diff before approving. Original comment threads are preserved in the previous view.';
+    $('#general-thread').hidden = true;
+    $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`;
+    render(); document.querySelector('main').scrollIntoView({block: 'start'});
+  } catch (error) { toast(error.message); }
+}
+async function approveReview() {
+  if (!submitted) { openReview(); return; }
+  if (!activeReview || activeReview.completion || activeReview.outcome !== 'changes_requested') return;
+  if (!session.verifying) { await verifyLatest(); toast('Inspect the latest diff, then click Approve to finish.'); return; }
+  $('#approve-final').disabled = true;
+  try {
+    const response = await fetch(`/api/reviews/${activeReview.id}/approve`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify({revision: session.revision})});
+    const data = await response.json(); if (!response.ok) throw new Error(data.error);
+    activeReview = data.review; clearInterval(replyTimer);
+    $('#review-status-text').textContent = 'Review approved · this is the version you approved. Original comment threads remain saved.';
+    $('#reply-connection').textContent = 'Approval saved locally. It does not merge or commit changes.';
+    render(); toast('Review approved');
+  } catch (error) { toast(error.message); }
+  finally { $('#approve-final').disabled = false; }
+}
+$('#verify-latest').onclick = verifyLatest;
+$('#back-to-threads').onclick = loadSession;
+$('#approve-top').onclick = approveReview;
+$('#approve-end').onclick = approveReview;
+$('#approve-final').onclick = approveReview;

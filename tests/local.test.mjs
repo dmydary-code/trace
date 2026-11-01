@@ -180,3 +180,44 @@ test('CLI timeout stops its detached viewer without inventing feedback', {timeou
   }
   assert.fail('Timed-out viewer remained alive');
 });
+
+test('final approval records the inspected revision and preserves original threads', async t => {
+  const {repo} = await fixture(t); await writeFile(join(repo, 'file.ts'), 'export const count = 2;\n');
+  const app = await createTraceServer({repo}); t.after(() => app.close());
+  const session = await (await fetch(app.url + '/api/session')).json();
+  const headers = {Origin: app.url, 'X-Trace-Token': session.token};
+  const initial = await fetch(app.url + '/api/reviews', {method:'POST',headers,body:JSON.stringify({revision:session.revision,comments:[],instruction:'Adjust the count'})});
+  const {id} = await initial.json();
+  await writeFile(join(repo,'file.ts'), 'export const count = 3;\n');
+  const approve = (revision, extra = {}) => fetch(app.url + `/api/reviews/${id}/approve`, {method:'POST',headers:{...headers,...extra},body:JSON.stringify({revision})});
+  assert.equal((await approve(session.revision, {Origin:'https://example.invalid'})).status,403);
+  assert.equal((await approve(session.revision)).status,409);
+  const latest = await (await fetch(app.url + `/api/reviews/${id}/current`)).json();
+  assert.equal(latest.verifying,true); assert.notEqual(latest.revision,session.revision);
+  const approved = await approve(latest.revision); assert.equal(approved.status,200);
+  const {review} = await approved.json();
+  assert.equal(review.outcome,'changes_requested');
+  assert.equal(review.completion.outcome,'approved');
+  assert.equal(review.completion.revision,latest.revision);
+  assert.equal(review.instruction,'Adjust the count');
+  assert.equal((await approve(latest.revision)).status,400);
+  const restored = await (await fetch(app.url+'/api/session')).json();
+  assert.equal(restored.revision,session.revision);
+  assert.equal(restored.submittedReview.completion.revision,latest.revision);
+  const record = JSON.parse(await readFile(join(app.repository.gitDir,'trace','reviews',id,review.completion.snapshotFile),'utf8'));
+  assert.equal(record.revision,latest.revision); assert.equal(record.token,undefined);
+});
+
+test('reopening a review retains its baseline after HEAD advances', async t => {
+  const {repo,git} = await fixture(t);
+  await writeFile(join(repo,'file.ts'),'export const count = 2;\n');
+  const original = await createTraceServer({repo}); t.after(() => original.close());
+  const session = await (await fetch(original.url+'/api/session')).json();
+  const response = await fetch(original.url+'/api/reviews',{method:'POST',headers:{Origin:original.url,'X-Trace-Token':session.token},body:JSON.stringify({revision:session.revision,comments:[],instruction:'Check the count'})});
+  const {id} = await response.json();
+  await git('add','.'); await git('commit','-m','advance HEAD');
+  const reopened = await createTraceServer({repo,reviewId:id}); t.after(() => reopened.close());
+  const current = await (await fetch(reopened.url+`/api/reviews/${id}/current`)).json();
+  assert.equal(current.files.length,1);
+  assert.ok(current.files[0].lines.some(l => l.kind === 'add' && l.text.includes('2')));
+});

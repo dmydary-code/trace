@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {classify,orderedFiles,parseDiff,reviewPrompt} from '../dist/core.mjs';
+import {classify,orderedFiles,parseDiff,reviewPrompt,changeSections} from '../dist/core.mjs';
 import {demos} from './fixtures/demo.mjs';
 test('route reorders files by responsibility and keeps every file',()=>{
  const source=demos.backend;const routed=orderedFiles(source,'backend','route');
@@ -37,4 +37,18 @@ test('framework and architecture presets classify conventions without dropping u
  assert.equal(classify('src/events/order.event.ts','backend','nestjs','events'),'Event contracts');
  assert.equal(classify('src/consumer/order.ts','backend','nestjs','events'),'Consumers');
  assert.equal(classify('src/OrderReducer.kt','mobile','android','udf'),'Actions & reducers');
+});
+
+test('route navigation contains only touched stages and keeps package boundaries', () => {
+ const source = [
+  {path:'web/tests/cart.test.ts',route:{group:'web · React',layer:'Tests',rank:4}},
+  {path:'web/src/hooks/useCart.ts',route:{group:'web · React',layer:'Hooks & state',rank:1}},
+  {path:'api/cart.service.ts',route:{group:'api · NestJS',layer:'Implementation',rank:1}},
+ ];
+ const sections = changeSections(source);
+ assert.deepEqual(sections.map(s => s.layer), ['Implementation', 'Hooks & state', 'Tests']);
+ assert.equal(sections.flatMap(s => s.files).length, source.length);
+ assert.equal(new Set(sections.map(s => s.id)).size, 3);
+ assert.deepEqual(changeSections(source,'test').map(s => s.layer), ['Tests']);
+ assert.deepEqual(changeSections(source,'no-such-file'), []);
 });

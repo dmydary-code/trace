@@ -8,7 +8,7 @@ import {EventEmitter} from 'node:events';
 import {openRepository} from './lib/git.mjs';
 import {detectRoutes} from './lib/detect.mjs';
 import {reviewPrompt} from './dist/core.mjs';
-import {commentId, saveReview, readReview, readSnapshot, reviewDirectory} from './lib/reviews.mjs';
+import {commentId, saveReview, readReview, readSnapshot, reviewDirectory, approveSavedReview} from './lib/reviews.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 function json(res, status, data) {
@@ -27,7 +27,11 @@ async function body(req) {
 
 export async function createTraceServer(options = {}) {
   if (options.agent && options.agent !== 'codex') throw new Error('Supported child agent: codex');
-  const repository = await openRepository(options.repo || process.cwd(), options);
+  let repository = await openRepository(options.repo || process.cwd(), options);
+  if (options.reviewId) {
+    const saved = await readSnapshot(repository.gitDir, options.reviewId);
+    repository = await openRepository(repository.repo, {base: saved.base, frozenRef: saved.baseRevision, staged: saved.comparison === 'staged'});
+  }
   const token = randomBytes(24).toString('hex'), events = new EventEmitter(), jobs = new Map();
   const sessionId = randomUUID();
   let running = false, submitted = !!options.reviewId, submittedId = options.reviewId || null, origin;
@@ -36,8 +40,11 @@ export async function createTraceServer(options = {}) {
       const data = await readSnapshot(repository.gitDir, submittedId);
       return {...data, token, sessionId, handoff: 'saved-review', agent: options.agent || null, submittedReview: await readReview(repository.gitDir, submittedId)};
     }
+    return currentSnapshot();
+  }
+  async function currentSnapshot() {
     const data = await repository.snapshot();
-    const routes = await detectRoutes(repository.repo, data.files, {base: options.base, staged: options.staged});
+    const routes = await detectRoutes(repository.repo, data.files);
     return {...data, files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
   }
   const server = http.createServer(async (req, res) => {
@@ -47,6 +54,25 @@ export async function createTraceServer(options = {}) {
       const navigation = req.method === 'GET' && ['/', '/index.html'].includes(url.pathname) && req.headers['sec-fetch-mode'] === 'navigate';
       if (req.headers['sec-fetch-site'] === 'cross-site' && !navigation) return json(res, 403, {error: 'Cross-site requests are not allowed'});
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, await snapshot());
+      const currentMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/current$/);
+      if (req.method === 'GET' && currentMatch) {
+        if (currentMatch[1] !== submittedId) return json(res, 404, {error: 'Review not open in this viewer'});
+        return json(res, 200, {...await currentSnapshot(), verifying: true});
+      }
+      const approveMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/approve$/);
+      if (req.method === 'POST' && approveMatch) {
+        if (req.headers['x-trace-token'] !== token || req.headers.origin !== origin) return json(res, 403, {error: 'Open the review on the local server'});
+        if (approveMatch[1] !== submittedId) return json(res, 404, {error: 'Review not open in this viewer'});
+        if (running) return json(res, 409, {error: 'The agent is still running. Review its changes before approving.'});
+        running = true;
+        try {
+          const input = await body(req), current = await currentSnapshot();
+          if (input.revision !== current.revision) return json(res, 409, {error: 'Code has changed. Review latest changes before approving.'});
+          const {token: ignoredToken, sessionId: ignoredSession, handoff: ignoredHandoff, agent: ignoredAgent, ...saved} = current;
+          const review = await approveSavedReview(repository.gitDir, submittedId, saved);
+          return json(res, 200, {review});
+        } finally { running = false; }
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/reviews/')) return json(res, 200, await readReview(repository.gitDir, url.pathname.split('/').at(-1)));
       if (req.method === 'GET' && url.pathname.startsWith('/api/jobs/')) {
         const job = jobs.get(url.pathname.split('/').at(-1));
@@ -95,11 +121,11 @@ export async function createTraceServer(options = {}) {
         } catch (err) { running = false; throw err; }
       }
       if (req.method !== 'GET') return json(res, 405, {error: 'Method not supported'});
-      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/core.mjs': 'core.mjs'};
+      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
       const file = allowed[url.pathname]; if (!file) return json(res, 404, {error: 'Not found'});
       let content = await readFile(join(root, 'dist', file));
       if (file === 'index.html') content = content.toString().replace('<html lang="en">', '<html lang="en" data-trace-local="true">');
-      res.writeHead(200, {'Content-Type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.css') ? 'text/css' : 'text/javascript', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
+      res.writeHead(200, {'Content-Type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.woff2') ? 'font/woff2' : 'text/javascript', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
       res.end(content);
     } catch (err) { json(res, 400, {error: err.message}); }
   });
