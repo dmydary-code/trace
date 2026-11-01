@@ -1,6 +1,6 @@
 {
   "name": "trace",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Review local Git changes in a browser and return line feedback to the current coding agent.",
   "skills": "./skills/",
   "author": {

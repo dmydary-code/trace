@@ -44,6 +44,15 @@ test('unborn repository and paths with tabs/newlines can be reviewed', async t =
   const snapshot = await (await openRepository(repo)).snapshot();
   assert.equal(snapshot.files[0].path, path); assert.equal(snapshot.files[0].lines.at(-1).text, '--- header-like content');
 });
+test('review author follows effective Git identity without exposing email', async t => {
+  const {repo, git} = await fixture(t);
+  await git('config', 'author.name', 'Repository Author');
+  const source = await openRepository(repo);
+  assert.deepEqual((await source.snapshot()).author, {name: 'Repository Author'});
+  const code = `import {openRepository} from ${JSON.stringify(new URL('../lib/git.mjs', import.meta.url).href)}; console.log(JSON.stringify((await (await openRepository(process.argv[1])).snapshot()).author));`;
+  const override = await exec(process.execPath, ['--input-type=module', '-e', code, repo], {env: {...process.env, GIT_AUTHOR_NAME: 'Session Author', GIT_AUTHOR_EMAIL: 'session@example.invalid'}});
+  assert.deepEqual(JSON.parse(override.stdout), {name: 'Session Author'});
+});
 test('framework detection is per package and does not force one stack on a monorepo', async t => {
   const {repo} = await fixture(t);
   for (const [folder, deps] of [['web', {vue: '3'}], ['admin', {'@angular/core': '20'}], ['api', {'@nestjs/core': '11'}], ['react', {react: '19'}]]) {
