@@ -35,7 +35,7 @@ function renderFeed() {
   $('#feed').innerHTML = list.map(f => { let heading = ''; const group = `${f.route.group}:${f.route.layer}`;
     if (state.mode === 'route' && group !== last) { last = group; section++; const label = (groups.size > 1 ? f.route.group + ' / ' : '') + f.route.layer; links.push({label, id: `layer-${section}`}); heading = `<div class="layer-heading" id="layer-${section}"><b>${section}</b><h2>${esc(label)}</h2></div>`; }
     return heading + fileCard(f);
-  }).join('') || `<div class="empty">${session ? 'No changes to display' : local ? 'Connecting to your repository…' : 'Run <code>trace</code> inside your Git repository to open a local review.'}</div>`;
+  }).join('') || `<div class="empty">${session ? 'No changes to display' : local ? 'Connecting to your repository…' : 'Run <code>trace-review</code> inside your Git repository to open a local review.'}</div>`;
   $('#route-links').innerHTML = links.map(l => `<a href="#${l.id}">${esc(l.label)}</a>`).join('<span>→</span>');
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
@@ -68,7 +68,7 @@ function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction 
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; $('#download').disabled = !hasFeedback; }
 $('#review').onclick = () => {
   const p = packet();
-  $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace feedback --json.';
+  $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
   $('#handoff-help').textContent = 'Only open comments from this revision are sent. If the code changes, refresh the diff before submitting.';
   $('#review-list').innerHTML = p.comments.map(c => `<div class="review-item"><code>${esc(c.path)}:${c.line} · ${c.side === 'old' ? 'old' : 'new'} version</code><p>${esc(c.body)}</p></div>`).join('') || '<p>Add line comments or describe your requested changes below.</p>';
   $('#instruction').value = review().instruction; $('#send').hidden = false; $('#approve').hidden = false; $('#cancel-review').hidden = false;
@@ -84,7 +84,7 @@ async function send(outcome) {
     const response = await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify(packet(outcome))});
     const job = await response.json(); if (!response.ok) throw new Error(job.error);
     submitted = true; $('#review').disabled = true;
-    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : session.handoff === 'waiting-agent' ? 'Review delivered. Continue in your agent conversation.' : 'Review saved. Run trace feedback --json in this repository to retrieve it.'; dialogButtons(); return; }
+    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : session.handoff === 'waiting-agent' ? 'Review delivered. Continue in your agent conversation.' : 'Review saved. Run trace-review feedback --json in this repository to retrieve it.'; dialogButtons(); return; }
     $('#job-state').textContent = 'Codex is working…';
     jobTimer = setInterval(async () => { try {
       const res = await fetch('/api/jobs/' + job.id); if (!res.ok) throw new Error('Could not retrieve job status'); const j = await res.json();
@@ -101,7 +101,7 @@ async function loadSession() {
     $('#repo').textContent = session.repo; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
     $('#detected').textContent = [...new Set(files().map(f => f.route.group).filter(g => g !== 'Other changes'))].join(' · ') || 'Automatic route';
     $('#refresh').hidden = false; editor = null; render();
-  } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace</code> in your repository and open the printed URL.</div>`; toast(err.message); }
+  } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();
 render(); if (local) loadSession();

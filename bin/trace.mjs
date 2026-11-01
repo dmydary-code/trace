@@ -12,10 +12,10 @@ const {version} = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const exec = promisify(execFile);
 const usage = `Trace ${version} — local code review for your current agent
 
-Usage: trace [review] [options]
-       trace feedback [--repo path] [--json]
-       trace install codex|claude|all
-       trace doctor [--repo path] [--json]
+Usage: trace-review [review] [options]
+       trace-review feedback [--repo path] [--json]
+       trace-review install codex|claude|all
+       trace-review doctor [--repo path] [--json]
 
 Review options:
   --repo PATH       Git repository (default: current directory)
@@ -48,7 +48,7 @@ try {
   if (options.version) console.log(version);
   else if (options.help || command === 'help') console.log(usage);
   else if (command === 'install') {
-    if (!['codex', 'claude', 'all'].includes(target)) throw new Error('Choose: trace install codex|claude|all');
+    if (!['codex', 'claude', 'all'].includes(target)) throw new Error('Choose: trace-review install codex|claude|all');
     const run = (exe, argv) => new Promise((ok, fail) => { const child = spawn(exe, argv, {stdio: 'inherit'}); child.on('error', fail); child.on('exit', code => code === 0 ? ok() : fail(new Error(`${exe} exited with ${code}`))); });
     for (const agent of target === 'all' ? ['codex', 'claude'] : [target]) {
       const listing = JSON.parse((await exec(agent, ['plugin', 'marketplace', 'list', '--json'])).stdout);
@@ -91,7 +91,7 @@ try {
     });
     process.once('SIGINT', () => finish(130)); process.once('SIGTERM', () => finish(143));
     if (options.json) emit({event: 'ready', url: app.url, repo: app.repository.repo, sessionId: app.sessionId});
-    else console.log(`Trace: ${app.url}\nRepository: ${app.repository.repo}\n${options.wait ? 'Waiting for review feedback…' : 'Submit feedback in the browser; retrieve it with trace feedback. Press Ctrl+C to stop.'}`);
+    else console.log(`Trace: ${app.url}\nRepository: ${app.repository.repo}\n${options.wait ? 'Waiting for review feedback…' : 'Submit feedback in the browser; retrieve it with trace-review feedback. Press Ctrl+C to stop.'}`);
     if (options.wait && options.timeout) timer = setTimeout(async () => { if (options.json) emit({event: 'timeout', sessionId: app.sessionId}); else console.error('Review timed out without a submission. No approval was inferred.'); await finish(2); }, options.timeout * 1000);
     if (!options.noOpen) {
       const executable = process.platform === 'darwin' ? 'open' : 'xdg-open';
