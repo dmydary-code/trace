@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {readFile} from 'node:fs/promises';
+import {readFile, realpath} from 'node:fs/promises';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn, execFile} from 'node:child_process';
@@ -56,8 +56,17 @@ try {
       const existing = entries.find(item => item.name === 'trace-tools');
       if (existing) {
         const location = existing.root || existing.path || existing.source?.path || existing.source?.url;
-        if (location && resolve(location) !== resolve(root)) throw new Error(`trace-tools is already registered at ${location}. Remove that marketplace with ${agent} plugin marketplace remove trace-tools before switching installations.`);
-        if (agent === 'claude') await run(agent, ['plugin', 'marketplace', 'update', 'trace-tools']);
+        const registeredRoot = location ? await realpath(location).catch(() => resolve(location)) : null;
+        const currentRoot = await realpath(root);
+        if (registeredRoot && registeredRoot !== currentRoot) {
+          // Codex canonicalizes Homebrew's opt symlink to a versioned Cellar path.
+          // Migrate only this package's prior Homebrew registration on upgrade.
+          const oldCellar = registeredRoot.match(/^(.*\/Cellar\/trace)\/[^/]+\/libexec$/);
+          const newCellar = currentRoot.match(/^(.*\/Cellar\/trace)\/[^/]+\/libexec$/);
+          if (!oldCellar || !newCellar || oldCellar[1] !== newCellar[1]) throw new Error(`trace-tools is already registered at ${location}. Remove that marketplace with ${agent} plugin marketplace remove trace-tools before switching installations.`);
+          await run(agent, ['plugin', 'marketplace', 'remove', 'trace-tools']);
+          await run(agent, ['plugin', 'marketplace', 'add', root]);
+        } else if (agent === 'claude') await run(agent, ['plugin', 'marketplace', 'update', 'trace-tools']);
       } else await run(agent, ['plugin', 'marketplace', 'add', root]);
       let installCommand = agent === 'codex' ? 'add' : 'install';
       if (agent === 'claude') {
