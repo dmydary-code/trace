@@ -1,6 +1,6 @@
 {
   "name": "trace-review",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Local Git review with change routes and feedback for coding agents",
   "private": true,
   "type": "module",

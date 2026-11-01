@@ -4,7 +4,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;',
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
 const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 const local = document.documentElement.dataset.traceLocal === 'true';
-let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false;
+let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
 const key = () => session ? `${session.repositoryId}:${session.revision}` : 'disconnected';
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
@@ -23,16 +23,52 @@ function tree() {
   const branch = node => [...node].sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => value instanceof Map ? `<details open><summary>${esc(name)}</summary><div>${branch(value)}</div></details>` : `<button class="file-link ${value.path === activePath ? 'active' : ''}" data-file="${esc(value.id)}" title="${esc(value.path)}"><span>⌘</span><span class="name">${esc(name)}</span><span class="status">${review().done.includes(value.path) ? '✓' : esc(value.status || 'M')}</span></button>`).join('');
   $('#tree').innerHTML = branch(root) || '<p>No matching files</p>'; $('#file-count').textContent = files().length;
 }
+const replyLabels = {addressed: 'Addressed', needs_input: 'Needs input', not_changed: 'Not changed', note: 'Note'};
+function replies(id) {
+  return (activeReview?.replies || []).filter(r => r.commentId === id).map(r => `<div class="agent-reply"><div class="thread-head"><span class="comment-author"><span class="avatar agent-avatar" aria-hidden="true">${esc(r.author.name.slice(0, 1))}</span><span class="author-name">${esc(r.author.name)}</span></span><span class="reply-status">${esc(replyLabels[r.status] || 'Reply')}</span><time datetime="${esc(r.createdAt)}">${esc(new Date(r.createdAt).toLocaleString())}</time></div><p>${esc(r.body)}</p></div>`).join('');
+}
 function thread(c) {
   const name = session?.author?.name || 'Git author not configured';
   const words = session?.author?.name?.trim().split(/\s+/u) || [];
   const initials = words.length ? [words[0], ...(words.length > 1 ? [words.at(-1)] : [])].map(word => Array.from(word)[0]).join('').toLocaleUpperCase() : '?';
-  return `<div class="thread ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="spacer"></span><button data-edit="${esc(c.id)}">Edit</button><button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button><button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button></div><p>${esc(c.body)}</p></div>`;
+  return `<div class="thread ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><p>${esc(c.body)}</p><div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
+}
+function syncSubmitted(data) {
+  activeReview = data; submitted = true; editor = null; editId = null;
+  const previous = new Map(review().comments.map(c => [c.id, c]));
+  const sentIds = new Set(data.comments.map(c => c.id));
+  review().comments = [...data.comments.map(c => ({...c, resolved: previous.get(c.id)?.resolved || false})), ...review().comments.filter(c => !sentIds.has(c.id))];
+  persist();
+  $('#refresh').hidden = true;
+  $('#review-status').hidden = false;
+  $('#review-status-text').textContent = data.outcome === 'changes_requested' ? 'Review submitted · showing the reviewed revision. Agent replies appear in each thread. Open a new review to inspect the updated code.' : data.outcome === 'approved' ? 'Review finished without requested changes.' : 'Review cancelled.';
+  $('#general-thread').hidden = !data.instruction;
+  $('#general-instruction').textContent = data.instruction;
+  $('#general-replies').innerHTML = replies('review');
+  startReplies();
+}
+function startReplies() {
+  clearInterval(replyTimer);
+  if (!activeReview || activeReview.outcome !== 'changes_requested') return;
+  replyTimer = setInterval(async () => {
+    try {
+      const response = await fetch('/api/reviews/' + activeReview.id);
+      if (!response.ok) throw new Error('Viewer unavailable');
+      const data = await response.json();
+      if (JSON.stringify(data.replies) !== JSON.stringify(activeReview.replies)) {
+        activeReview = data;
+        for (const node of document.querySelectorAll('[data-replies]')) node.innerHTML = replies(node.dataset.replies);
+      }
+      $('#reply-connection').textContent = 'Agent replies update automatically. Statuses are reported by the agent; resolve threads after checking the fix.';
+    } catch {
+      $('#reply-connection').textContent = `Viewer disconnected. Reopen saved threads: trace-review open --review ${activeReview.id}`;
+    }
+  }, 1500);
 }
 function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 function fileCard(f) {
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div>${state.mode === 'route' ? `<span class="footnote" title="${esc(f.route.evidence)}">${esc(f.route.layer)}</span>` : ''}<label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div>${state.mode === 'route' ? `<span class="footnote" title="${esc(f.route.evidence)}">${esc(f.route.layer)}</span>` : ''}<label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
   const list = files().filter(f => f.path.toLowerCase().includes(query)).sort((a, b) => (state.mode === 'route' ? a.route.group.localeCompare(b.route.group) || a.route.rank - b.route.rank : 0) || a.path.localeCompare(b.path));
@@ -42,6 +78,7 @@ function renderFeed() {
     return heading + fileCard(f);
   }).join('') || `<div class="empty">${session ? 'No changes to display' : local ? 'Connecting to your repository…' : 'Run <code>trace-review</code> inside your Git repository to open a local review.'}</div>`;
   $('#route-links').innerHTML = links.map(l => `<a href="#${l.id}">${esc(l.label)}</a>`).join('<span>→</span>');
+  $('#route-explanation').textContent = list.some(f => f.route.layer !== 'Other changes') ? 'The same diff, grouped by package and responsibility. Follow the stages below; files inside each stage stay in path order. Roles are inferred from manifests, imports and naming conventions, not a call graph.' : 'No supported framework or file role was identified in these changes. All files stay visible under Other changes, in path order. Change route will look similar to Files for this diff.';
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
@@ -68,7 +105,7 @@ document.addEventListener('change', e => { if (e.target.dataset.viewed) { const 
 $('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
 for (const mode of ['files', 'route']) $('#' + mode + '-mode').onclick = () => { state.mode = mode; persist(); render(); };
-function packet(outcome = 'changes_requested') { return {schemaVersion: 1, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
+function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; $('#download').disabled = !hasFeedback; }
 $('#review').onclick = () => {
@@ -88,8 +125,8 @@ async function send(outcome) {
   try {
     const response = await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify(packet(outcome))});
     const job = await response.json(); if (!response.ok) throw new Error(job.error);
-    submitted = true; $('#review').disabled = true;
-    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : session.handoff === 'waiting-agent' ? 'Review delivered. Continue in your agent conversation.' : 'Review saved. Run trace-review feedback --json in this repository to retrieve it.'; dialogButtons(); return; }
+    syncSubmitted({...job.review, replies: []}); render();
+    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : session.handoff === 'waiting-agent' ? 'Review delivered. Close this dialog to follow agent replies in your comment threads.' : 'Review saved. Your agent can read it with trace-review feedback --json and reply to each thread.'; dialogButtons(); return; }
     $('#job-state').textContent = 'Codex is working…';
     jobTimer = setInterval(async () => { try {
       const res = await fetch('/api/jobs/' + job.id); if (!res.ok) throw new Error('Could not retrieve job status'); const j = await res.json();
@@ -105,7 +142,10 @@ async function loadSession() {
     const next = await res.json(); if (next.sessionId !== session?.sessionId) submitted = false; session = next;
     $('#repo').textContent = session.repo; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
     $('#detected').textContent = [...new Set(files().map(f => f.route.group).filter(g => g !== 'Other changes'))].join(' · ') || 'Automatic route';
-    $('#refresh').hidden = false; editor = null; render();
+    clearInterval(replyTimer); activeReview = null; submitted = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
+    $('#refresh').hidden = false; editor = null;
+    if (next.submittedReview) syncSubmitted(next.submittedReview);
+    render();
   } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();

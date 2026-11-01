@@ -1,5 +1,5 @@
 import http from 'node:http';
-import {readFile, mkdir, writeFile, rename} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
@@ -8,6 +8,7 @@ import {EventEmitter} from 'node:events';
 import {openRepository} from './lib/git.mjs';
 import {detectRoutes} from './lib/detect.mjs';
 import {reviewPrompt} from './dist/core.mjs';
+import {commentId, saveReview, readReview, readSnapshot, reviewDirectory} from './lib/reviews.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 function json(res, status, data) {
@@ -29,8 +30,12 @@ export async function createTraceServer(options = {}) {
   const repository = await openRepository(options.repo || process.cwd(), options);
   const token = randomBytes(24).toString('hex'), events = new EventEmitter(), jobs = new Map();
   const sessionId = randomUUID();
-  let running = false, submitted = false, origin;
+  let running = false, submitted = !!options.reviewId, submittedId = options.reviewId || null, origin;
   async function snapshot() {
+    if (submittedId) {
+      const data = await readSnapshot(repository.gitDir, submittedId);
+      return {...data, token, sessionId, handoff: 'saved-review', agent: options.agent || null, submittedReview: await readReview(repository.gitDir, submittedId)};
+    }
     const data = await repository.snapshot();
     const routes = await detectRoutes(repository.repo, data.files, {base: options.base, staged: options.staged});
     return {...data, files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
@@ -42,6 +47,7 @@ export async function createTraceServer(options = {}) {
       const navigation = req.method === 'GET' && ['/', '/index.html'].includes(url.pathname) && req.headers['sec-fetch-mode'] === 'navigate';
       if (req.headers['sec-fetch-site'] === 'cross-site' && !navigation) return json(res, 403, {error: 'Cross-site requests are not allowed'});
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, await snapshot());
+      if (req.method === 'GET' && url.pathname.startsWith('/api/reviews/')) return json(res, 200, await readReview(repository.gitDir, url.pathname.split('/').at(-1)));
       if (req.method === 'GET' && url.pathname.startsWith('/api/jobs/')) {
         const job = jobs.get(url.pathname.split('/').at(-1));
         return json(res, job ? 200 : 404, job || {error: 'Job not found'});
@@ -64,19 +70,16 @@ export async function createTraceServer(options = {}) {
           const comments = input.comments.map(c => {
             const f = current.files.find(f => f.path === c.path), l = f?.lines[c.index];
             if (!Number.isInteger(c.index) || !l || l.kind === 'hunk' || c.line !== (l.new ?? l.old) || c.side !== (l.kind === 'del' ? 'old' : 'new') || typeof c.body !== 'string' || !c.body.trim() || c.body.length > 10000) throw new Error('Invalid comment anchor');
-            return {path: f.path, index: c.index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body: c.body.trim()};
+            return {id: commentId(c.id), path: f.path, index: c.index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body: c.body.trim()};
           });
-          const id = randomUUID(), dir = join(repository.gitDir, 'trace', 'reviews', id);
-          const review = {schemaVersion: 1, id, sessionId, outcome, createdAt: new Date().toISOString(), repo: repository.repo, revision: current.revision, base: current.base, comparison: current.comparison, comments, instruction};
+          if (new Set(comments.map(c => c.id)).size !== comments.length) throw new Error('Duplicate comment ID');
+          const id = randomUUID(), dir = reviewDirectory(repository.gitDir, id);
+          const review = {schemaVersion: 2, id, sessionId, author: current.author, outcome, createdAt: new Date().toISOString(), repo: repository.repo, revision: current.revision, base: current.base, comparison: current.comparison, comments, instruction};
           const prompt = outcome === 'changes_requested' ? reviewPrompt(review) + (instruction ? '\n\nAdditional instructions:\n' + instruction : '') : outcome === 'approved' ? 'The user finished this review without requesting changes. This does not authorize committing, merging, or publishing.' : 'The user cancelled this review. Do not infer approval.';
           const result = {...review, prompt, reviewPath: join(dir, 'review.json')};
-          await mkdir(dir, {recursive: true, mode: 0o700});
-          await writeFile(result.reviewPath, JSON.stringify(result, null, 2) + '\n', {mode: 0o600});
-          await writeFile(join(dir, 'prompt.md'), prompt + '\n', {mode: 0o600});
-          const latest = join(repository.gitDir, 'trace', 'latest.json');
-          await writeFile(latest + '.' + id, JSON.stringify(result, null, 2) + '\n', {mode: 0o600});
-          await rename(latest + '.' + id, latest);
-          submitted = true;
+          const {token: ignoredToken, sessionId: ignoredSession, handoff: ignoredHandoff, agent: ignoredAgent, ...savedSnapshot} = current;
+          await saveReview(repository.gitDir, result, savedSnapshot);
+          submitted = true; submittedId = id;
           if (options.agent && outcome === 'changes_requested') {
             const job = {id, status: 'running', output: ''}; jobs.set(id, job);
             const child = spawn('codex', ['exec', '--sandbox', 'workspace-write', '-C', repository.repo, '--color', 'never', '-o', join(dir, 'result.txt'), '-'], {stdio: ['pipe', 'ignore', 'pipe']});
@@ -84,11 +87,11 @@ export async function createTraceServer(options = {}) {
             child.stderr.on('data', c => { job.output = (job.output + c).slice(-16000); });
             child.on('error', err => { job.status = 'failed'; job.output = err.message; running = false; });
             child.on('close', async code => { if (job.status === 'failed') return; job.status = code === 0 ? 'succeeded' : 'failed'; try { job.output = await readFile(join(dir, 'result.txt'), 'utf8'); } catch {} running = false; });
-            return json(res, 202, {id, status: 'running'});
+            return json(res, 202, {id, status: 'running', review: result});
           }
           running = false;
           res.once('finish', () => events.emit('review', result));
-          return json(res, 201, {id, status: 'submitted', outcome, reviewPath: result.reviewPath});
+          return json(res, 201, {id, status: 'submitted', outcome, reviewPath: result.reviewPath, review: result});
         } catch (err) { running = false; throw err; }
       }
       if (req.method !== 'GET') return json(res, 405, {error: 'Method not supported'});

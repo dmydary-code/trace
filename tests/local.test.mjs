@@ -9,6 +9,8 @@ import {promisify} from 'node:util';
 import {openRepository} from '../lib/git.mjs';
 import {createTraceServer} from '../server.mjs';
 import {detectRoutes} from '../lib/detect.mjs';
+import {addReply, readReview} from '../lib/reviews.mjs';
+import {randomUUID} from 'node:crypto';
 const exec = promisify(execFile);
 async function fixture(t, commit = true) {
   const repo = await mkdtemp(join(tmpdir(), 'trace-local-'));
@@ -73,14 +75,15 @@ test('feedback persists exact validated anchors and rejects stale/duplicate subm
   assert.equal(navigationStatus, 200);
   assert.equal((await fetch(app.url + '/api/session', {headers: {'Sec-Fetch-Site': 'cross-site'}})).status, 403);
   const session = await (await fetch(app.url + '/api/session')).json(), f = session.files[0], index = f.lines.findIndex(l => l.kind === 'add');
-  const packet = {revision: session.revision, comments: [{path: f.path, index, line: f.lines[index].new, side: 'new', code: 'forged', body: 'Use a named constant'}]};
+  const packet = {revision: session.revision, comments: [{id: randomUUID(), path: f.path, index, line: f.lines[index].new, side: 'new', code: 'forged', body: 'Use a named constant'}]};
   const post = (p, headers = {}) => fetch(app.url + '/api/reviews', {method: 'POST', headers: {Origin: app.url, 'X-Trace-Token': session.token, ...headers}, body: JSON.stringify(p)});
   assert.equal((await post(packet, {Origin: 'https://example.invalid'})).status, 403);
   assert.equal((await post({...packet, revision: 'stale'})).status, 409);
   assert.equal((await post({...packet, comments: [{...packet.comments[0], index: -1}]})).status, 400);
+  assert.equal((await post({...packet, comments: [packet.comments[0], packet.comments[0]]})).status, 400);
   const received = new Promise(ok => app.events.once('review', ok));
   const response = await post(packet); assert.equal(response.status, 201);
-  const result = await received; assert.equal(result.comments[0].code, 'export const count = 2;');
+  const result = await received; assert.equal(result.comments[0].id, packet.comments[0].id); assert.equal(result.comments[0].code, 'export const count = 2;');
   assert.equal((await post(packet)).status, 409);
   const persisted = JSON.parse(await readFile(result.reviewPath, 'utf8')); assert.equal(persisted.sessionId, session.sessionId);
   const feedback = await exec(process.execPath, [resolve('bin/trace.mjs'), 'feedback', '--repo', repo, '--json']);
@@ -94,10 +97,16 @@ test('CLI wait completes with feedback in the calling process without running a 
   const ready = new Promise(ok => readyResolve = ok);
   child.stdout.on('data', d => { output += d; while (output.includes('\n')) { const split = output.indexOf('\n'), line = output.slice(0, split); output = output.slice(split + 1); const event = JSON.parse(line); events.push(event); if (event.event === 'ready') readyResolve(event); } });
   const done = new Promise((ok, fail) => { child.on('error', fail); child.on('close', ok); });
-  const {url, sessionId} = await ready; const session = await (await fetch(url + '/api/session')).json();
+  const {url, sessionId, viewerPid} = await ready; t.after(() => { try { process.kill(viewerPid); } catch {} }); const session = await (await fetch(url + '/api/session')).json();
   const response = await fetch(url + '/api/reviews', {method: 'POST', headers: {Origin: url, 'X-Trace-Token': session.token}, body: JSON.stringify({revision: session.revision, comments: [], instruction: 'Add a boundary test'})});
   assert.equal(response.status, 201); assert.equal(await done, 0);
   assert.equal(events[1].event, 'feedback'); assert.equal(events[1].sessionId, sessionId); assert.match(events[1].prompt, /boundary test/);
+  assert.equal((await fetch(url + '/api/session')).status, 200, 'viewer survives the calling command');
+  const replyFile = join(repo, 'reply.txt'); await writeFile(replyFile, 'Added the requested boundary test.');
+  await exec(process.execPath, [resolve('bin/trace.mjs'), 'reply', '--repo', repo, '--review', events[1].id, '--comment', 'review', '--agent', 'codex', '--body-file', replyFile, '--json']);
+  const persisted = await (await fetch(url + '/api/reviews/' + events[1].id)).json();
+  assert.equal(persisted.replies[0].commentId, 'review');
+  assert.equal(persisted.replies[0].author.name, 'Codex');
 });
 test('finish and cancellation are explicit distinct outcomes', async t => {
   for (const outcome of ['approved', 'cancelled']) {
@@ -109,4 +118,65 @@ test('finish and cancellation are explicit distinct outcomes', async t => {
       assert.equal(response.status, 201); assert.equal((await received).outcome, outcome);
     } finally { await app.close(); }
   }
+});
+
+test('thread replies persist concurrently, validate targets, and retain the reviewed diff after edits', async t => {
+  const {repo} = await fixture(t); await writeFile(join(repo, 'file.ts'), 'export const count = 2;\n');
+  const app = await createTraceServer({repo}); t.after(() => app.close());
+  const session = await (await fetch(app.url + '/api/session')).json(), file = session.files[0];
+  const index = file.lines.findIndex(l => l.kind === 'add'), id = randomUUID();
+  const response = await fetch(app.url + '/api/reviews', {method: 'POST', headers: {Origin: app.url, 'X-Trace-Token': session.token}, body: JSON.stringify({revision: session.revision, comments: [{id, path: file.path, index, line: file.lines[index].new, side: 'new', body: 'Explain the boundary.'}]})});
+  const {review} = await response.json();
+  const gitDir = app.repository.gitDir;
+  await assert.rejects(addReply(gitDir, {reviewId: review.id, commentId: randomUUID(), agent: 'codex', body: 'wrong'}), /does not belong/);
+  await assert.rejects(addReply(gitDir, {reviewId: review.id, commentId: id, agent: 'user', body: 'wrong'}), /agent must/);
+  await assert.rejects(addReply(gitDir, {reviewId: review.id, commentId: id, agent: 'codex', body: ' '}), /1–10000/);
+  await assert.rejects(addReply(gitDir, {reviewId: review.id, commentId: id, agent: 'codex', body: 'ok', status: 'resolved'}), /Invalid reply status/);
+  await Promise.all(Array.from({length: 8}, (_, n) => addReply(gitDir, {reviewId: review.id, commentId: id, agent: n % 2 ? 'claude' : 'codex', body: `Check ${n}`, status: 'note'})));
+  assert.equal((await readReview(gitDir, review.id)).replies.length, 8);
+  await writeFile(join(repo, 'file.ts'), 'export const count = 999;\n');
+  const frozen = await (await fetch(app.url + '/api/session')).json();
+  assert.equal(frozen.revision, session.revision);
+  assert.equal(frozen.submittedReview.replies.length, 8);
+  assert.equal(frozen.files[0].lines[index].text, 'export const count = 2;');
+  const reopened = await createTraceServer({repo, reviewId: review.id}); t.after(() => reopened.close());
+  const restored = await (await fetch(reopened.url + '/api/session')).json();
+  assert.equal(restored.submittedReview.comments[0].id, id);
+  assert.equal(restored.submittedReview.replies.length, 8);
+  assert.equal(restored.revision, session.revision);
+  assert.notEqual(restored.token, frozen.token);
+});
+test('backend and mobile route signals match the advertised stacks', async t => {
+  const {repo} = await fixture(t);
+  const cases = [
+    ['python', 'requirements.txt', 'fastapi==0.115.0', 'services/cart.py', 'fastapi', 'Implementation'],
+    ['jvm', 'pom.xml', '<groupId>org.springframework.boot</groupId>', 'src/CartService.java', 'spring', 'Implementation'],
+    ['android', 'build.gradle.kts', 'plugins { id("com.android.application") }', 'src/CartViewModel.kt', 'android', 'Screen state'],
+    ['ios', 'Package.swift', 'platforms: [.iOS(.v17)]', 'Sources/CartView.swift', 'ios', 'Screens & navigation'],
+    ['flutter', 'pubspec.yaml', 'dependencies:\n  flutter:\n    sdk: flutter', 'lib/cart_repository.dart', 'flutter', 'Data & repositories'],
+  ];
+  for (const [folder, manifest, body] of cases) { await mkdir(join(repo, folder)); await writeFile(join(repo, folder, manifest), body); }
+  const routes = await detectRoutes(repo, cases.map(([folder, , , path]) => ({path: `${folder}/${path}`, lines: []})));
+  assert.deepEqual(routes.map(r => [r.stack, r.layer]), cases.map(c => [c[4], c[5]]));
+  const swift = await detectRoutes(repo, [{path: 'StandaloneView.swift', lines: [{text: 'import UIKit'}]}]);
+  assert.equal(swift[0].stack, 'ios');
+});
+
+test('CLI timeout stops its detached viewer without inventing feedback', {timeout: 10000}, async t => {
+  const {repo} = await fixture(t);
+  const child = spawn(process.execPath, [resolve('bin/trace.mjs'), '--repo', repo, '--wait', '--json', '--no-open', '--timeout', '0.1'], {stdio: ['ignore', 'pipe', 'pipe']});
+  let output = ''; child.stdout.on('data', d => output += d);
+  t.after(() => child.kill());
+  const code = await new Promise((ok, fail) => { child.on('error', fail); child.on('close', ok); });
+  assert.equal(code, 2);
+  const events = output.trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(events.map(e => e.event), ['ready', 'timeout']);
+  const {url, viewerPid} = events[0];
+  t.after(() => { try { process.kill(viewerPid); } catch {} });
+  for (let i = 0; i < 20; i++) {
+    const reachable = await fetch(url + '/api/session').then(() => true, () => false);
+    if (!reachable) return;
+    await new Promise(ok => setTimeout(ok, 25));
+  }
+  assert.fail('Timed-out viewer remained alive');
 });
