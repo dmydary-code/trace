@@ -1,4 +1,4 @@
-class Trace < Formula
+class TraceReview < Formula
   desc "Local Git review with change routes and feedback for coding agents"
   homepage "https://github.com/dmydary-code/trace"
   license "MIT"

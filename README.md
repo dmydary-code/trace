@@ -19,7 +19,7 @@ Requires Homebrew, Git, and Codex or Claude Code. [Installation notes](docs/cli.
 2. **Install Trace.**
 
    ```sh
-   brew install dmydary-code/trace/trace
+   brew install trace-review
    ```
 
 3. **Connect your agents.** Use `all` for both Codex and Claude Code, or replace it with `codex` or `claude` for just one.

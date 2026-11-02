@@ -6,7 +6,9 @@ Install and authenticate Codex or Claude Code separately. Run `trace-review inst
 
 If the repository is private, authenticate a GitHub account with repository access using `gh auth login`, then run `gh auth setup-git --hostname github.com` before installing the Homebrew tap.
 
-To update, run `brew update`, `brew upgrade dmydary-code/trace/trace`, and `trace-review install all`, then restart the agent.
+To update, run `brew update`, `brew upgrade dmydary-code/trace/trace-review`, and `trace-review install all`, then restart the agent.
+
+The Homebrew package was renamed from `trace` to `trace-review`. Existing installations can run `brew update` and `brew migrate dmydary-code/trace/trace`, then `brew upgrade dmydary-code/trace/trace-review` and `trace-review install all`. Review data stays in each repository’s Git metadata.
 
 ## Standalone CLI
 
@@ -65,7 +67,7 @@ Tests exercise actual temporary Git repositories, diff anchors, automatic packag
 
 ## Distribution maintenance
 
-The repository doubles as a Homebrew tap. `Formula/trace.rb` pins a release tag and Git revision. Plugin marketplaces for Codex and Claude Code are bundled with the CLI. After `brew upgrade`, run `trace-review install all` again to refresh the agent's cached skill, then restart the agent.
+The repository doubles as a Homebrew tap. `Formula/trace-review.rb` pins a release tag and Git revision. Plugin marketplaces for Codex and Claude Code are bundled with the CLI. After `brew upgrade`, run `trace-review install all` again to refresh the agent's cached skill, then restart the agent.
 
 Plugin formats follow the [Codex plugin packaging documentation](https://developers.openai.com/plugins/build/plugins) and [Claude Code plugin reference](https://code.claude.com/docs/en/plugins-reference). Homebrew distribution follows the [tap documentation](https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap).
 

@@ -7,6 +7,7 @@ import {promisify} from 'node:util';
 import {createTraceServer} from '../server.mjs';
 import {openRepository} from '../lib/git.mjs';
 import {gitOutput} from '../lib/git-command.mjs';
+import {isTraceBrewMigration} from '../lib/install-source.mjs';
 import {readReview, readSnapshot, addReply} from '../lib/reviews.mjs';
 
 const root = process.env.TRACE_BUNDLE_HOME || dirname(dirname(fileURLToPath(import.meta.url)));
@@ -60,7 +61,14 @@ try {
     const run = (exe, argv) => new Promise((ok, fail) => { const child = spawn(exe, argv, {stdio: 'inherit'}); child.on('error', fail); child.on('exit', code => code === 0 ? ok() : fail(new Error(`${exe} exited with ${code}`))); });
     for (const agent of target === 'all' ? ['codex', 'claude'] : [target]) {
       if (agent === 'codex') {
-        // Native add is an upsert. It repairs stale Cellar paths before list/load.
+        const {marketplaces} = JSON.parse((await exec(agent, ['plugin', 'marketplace', 'list', '--json'])).stdout);
+        const existing = marketplaces.find(item => item.name === 'trace-tools');
+        const location = existing?.marketplaceSource?.source || existing?.root;
+        if (location) {
+          const registeredRoot = await realpath(location).catch(() => resolve(location));
+          const bundleRoot = await realpath(root);
+          if (registeredRoot !== bundleRoot && isTraceBrewMigration(registeredRoot, bundleRoot)) await run(agent, ['plugin', 'marketplace', 'remove', 'trace-tools']);
+        }
         await run(agent, ['plugin', 'marketplace', 'add', root]);
       } else {
         const entries = JSON.parse((await exec(agent, ['plugin', 'marketplace', 'list', '--json'])).stdout);
@@ -68,8 +76,12 @@ try {
         if (existing) {
           const location = existing.path || existing.installLocation;
           const registeredRoot = location ? await realpath(location).catch(() => resolve(location)) : null;
-          if (registeredRoot && registeredRoot !== await realpath(root)) throw new Error(`trace-tools is already registered at ${location}. Remove that marketplace with claude plugin marketplace remove trace-tools before switching installations.`);
-          await run(agent, ['plugin', 'marketplace', 'update', 'trace-tools']);
+          const bundleRoot = await realpath(root);
+          if (registeredRoot && registeredRoot !== bundleRoot) {
+            if (!isTraceBrewMigration(registeredRoot, bundleRoot)) throw new Error(`trace-tools is already registered at ${location}. Remove that marketplace with claude plugin marketplace remove trace-tools before switching installations.`);
+            await run(agent, ['plugin', 'marketplace', 'remove', 'trace-tools']);
+            await run(agent, ['plugin', 'marketplace', 'add', root]);
+          } else await run(agent, ['plugin', 'marketplace', 'update', 'trace-tools']);
         } else await run(agent, ['plugin', 'marketplace', 'add', root]);
       }
       let installCommand = agent === 'codex' ? 'add' : 'install';
