@@ -4,17 +4,31 @@ Local code review for Codex and Claude Code. Follow changes in a useful order, l
 
 <p><img src="docs/assets/icons/react.svg" width="32" height="32" alt="React"> &nbsp; <img src="docs/assets/icons/vuejs.svg" width="32" height="32" alt="Vue"> &nbsp; <img src="docs/assets/icons/angular.svg" width="32" height="32" alt="Angular"> &nbsp; <img src="docs/assets/icons/nestjs.svg" width="32" height="32" alt="NestJS"> &nbsp; <img src="docs/assets/icons/fastapi.svg" width="32" height="32" alt="FastAPI"> &nbsp; <img src="docs/assets/icons/spring.svg" width="32" height="32" alt="Spring"> &nbsp; <img src="docs/assets/icons/android.svg" width="32" height="32" alt="Android"> &nbsp; <img src="docs/assets/icons/swift.svg" width="32" height="32" alt="SwiftUI / UIKit"> &nbsp; <img src="docs/assets/icons/flutter.svg" width="32" height="32" alt="Flutter"></p>
 
+![Switching from Files to Change route and following outlined stages in an example React project](docs/assets/change-route.gif)
+
 ## Getting started
 
 Requires Homebrew, Git, and Codex or Claude Code. [Installation notes](docs/cli.md#installation).
 
-```sh
-brew tap dmydary-code/trace https://github.com/dmydary-code/trace.git
-brew install dmydary-code/trace/trace
-trace-review install all
-```
+1. **Add the Homebrew tap.** Do this once.
 
-Replace `all` with `codex` or `claude` to install just one integration. Restart your agent and open your project:
+   ```sh
+   brew tap dmydary-code/trace https://github.com/dmydary-code/trace.git
+   ```
+
+2. **Install Trace.**
+
+   ```sh
+   brew install dmydary-code/trace/trace
+   ```
+
+3. **Connect your agents.** Use `all` for both Codex and Claude Code, or replace it with `codex` or `claude` for just one.
+
+   ```sh
+   trace-review install all
+   ```
+
+Restart your agent and open your project:
 
 - **Codex:** ask “Use Trace to review my changes.”
 - **Claude Code:** run `/trace:review`.
