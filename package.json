@@ -1,6 +1,6 @@
 {
   "name": "trace-review",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local Git review with change routes and feedback for coding agents",
   "license": "MIT",
   "private": true,

@@ -4,6 +4,16 @@
 
 #review-status{border-left:3px solid var(--accent);padding:8px 15px;margin-top:20px;background:var(--panel)}#review-status p{font-size:12px}.agent-reply{border-top:1px solid var(--line);margin-top:14px;padding-top:14px;margin-left:42px}.agent-avatar{background:var(--raised);color:var(--blue)}.reply-status{border:1px solid var(--line);border-radius:5px;padding:2px 7px;color:var(--accent)}.thread time{color:var(--muted);font-size:10px}#general-thread{margin-top:16px;border:1px solid var(--line);border-radius:8px}#route-explanation{max-width:850px;margin-top:12px}[hidden]{display:none!important}
 @font-face{font-family:'Fragment Mono';src:url('fonts/FragmentMono-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+:root{--route-border:#607652;--route-tint:#192219}
+[data-theme=light]{--route-border:#91ae7c;--route-tint:#f2f7ee}
+.route-section{border:1px solid var(--route-border);border-left-width:3px;border-radius:12px;padding:16px;margin:14px 0 28px;background:var(--route-tint);scroll-margin-top:86px;transition:border-color .15s,box-shadow .15s}
+.route-section:target,.route-section:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 16%,transparent)}
+.route-section>.layer-heading{margin:0 0 16px;gap:10px}
+.route-section>.layer-heading b{border-color:var(--route-border);background:var(--bg);flex-shrink:0}
+.route-section>.layer-heading span{margin-left:auto;white-space:nowrap}
+.route-section>.file-card{background:var(--bg);margin-bottom:14px}
+.route-section>.file-card:last-child{margin-bottom:0}
+@media(max-width:650px){.route-section{padding:10px 7px;border-radius:9px}.route-section>.layer-heading{flex-wrap:wrap;padding:0 3px}}
 :root{--display-font:'Fragment Mono',ui-monospace,monospace}
 h1,h2,h3,.sidebar-title,.route-caption>span:first-child,.primary,.accent-outline,.logo{font-family:var(--display-font);font-weight:400}
 h1{font-size:25px;letter-spacing:-1px;line-height:1.35}.layer-heading h2{font-size:14px;letter-spacing:-.4px}.sidebar-title{font-size:13px;align-items:center}.primary,.accent-outline{font-size:12px}.accent-outline{color:var(--accent);border-color:var(--accent);background:transparent}
