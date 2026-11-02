@@ -6,6 +6,7 @@ import {spawn} from 'node:child_process';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {openRepository} from './lib/git.mjs';
+import {buildGraph} from './lib/graph.mjs';
 import {detectRoutes} from './lib/detect.mjs';
 import {reviewPrompt} from './dist/core.mjs';
 import {commentId, saveReview, readReview, readSnapshot, reviewDirectory, approveSavedReview} from './lib/reviews.mjs';
@@ -45,7 +46,7 @@ export async function createTraceServer(options = {}) {
   async function currentSnapshot() {
     const data = await repository.snapshot();
     const routes = await detectRoutes(repository.repo, data.files);
-    return {...data, files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
+    return {...data, graph: await buildGraph(repository.repo, data), files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
   }
   const server = http.createServer(async (req, res) => {
     try {
@@ -121,7 +122,7 @@ export async function createTraceServer(options = {}) {
         } catch (err) { running = false; throw err; }
       }
       if (req.method !== 'GET') return json(res, 405, {error: 'Method not supported'});
-      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
+      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/graph-layout.mjs': 'graph-layout.mjs', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
       const file = allowed[url.pathname]; if (!file) return json(res, 404, {error: 'Not found'});
       let content = await readFile(join(root, 'dist', file));
       if (file === 'index.html') content = content.toString().replace('<html lang="en">', '<html lang="en" data-trace-local="true">');

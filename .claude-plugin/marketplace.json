@@ -7,7 +7,7 @@
     {
       "name": "trace",
       "source": "./plugins/trace",
-      "description": "Local Git review with change routes and inline feedback for coding agents."
+      "description": "Local Git review with dependency graphs and inline feedback for coding agents."
     }
   ],
   "metadata": {

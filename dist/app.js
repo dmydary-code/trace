@@ -1,8 +1,10 @@
-import {reviewPrompt, changeSections, compactFileTree} from './core.mjs';
+import {stableGraphLayout, revealGraphPath, fileCommentCount, routeGraphEdges, graphZoom} from './graph-layout.mjs';
+import {reviewPrompt, compactFileTree} from './core.mjs';
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
 const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
+if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
@@ -12,7 +14,8 @@ const files = () => session?.files || [];
 function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Export your review.'); } }
 function sidebarWidth(value) { return Math.max(180, Math.min(Number(value) || 266, 640, window.innerWidth - 320)); }
 function applySidebarWidth() {
- const width = sidebarWidth(state.sidebarWidth);
+ const width = state.sidebarCollapsed ? 0 : sidebarWidth(state.sidebarWidth);
+ document.body.classList.toggle('sidebar-collapsed', !!state.sidebarCollapsed);
  document.documentElement.style.setProperty('--sidebar-width', width + 'px');
  $('#sidebar-resizer').setAttribute('aria-valuenow', Math.round(width));
  $('#sidebar-resizer').setAttribute('aria-valuemax', Math.max(180, Math.min(640, window.innerWidth - 320)));
@@ -70,15 +73,8 @@ function layerIcon(layer) {
 const lineKey = (path, index) => `${path}:${index}`;
 function tree() {
   const fileLink = (f, label) => `<button class="file-link ${f.path === activePath ? 'active' : ''}" data-file="${esc(f.id)}" title="${esc(f.path)}">${icon('file')}<span class="name">${esc(label)}</span><span class="status">${review().done.includes(f.path) ? '✓' : esc(f.status || 'M')}</span></button>`;
-  $('#sidebar-heading').textContent = state.mode === 'route' ? 'Change route' : 'Changed files';
-  if (state.mode === 'route') {
-    const sections = changeSections(files(), query), groups = new Set(sections.map(s => s.group)); let lastGroup;
-    $('#tree').innerHTML = sections.map(section => {
-      const groupLabel = groups.size > 1 && section.group !== lastGroup ? `<div class="route-package">${esc(section.group)}</div>` : '';
-      lastGroup = section.group;
-      return groupLabel + `<div class="route-group"><a class="route-stage ${section.files.some(f => f.path === activePath) ? 'active' : ''}" href="#${section.id}">${icon(layerIcon(section.layer))}<span>${esc(section.layer)}</span><small>${section.files.length}</small></a><div class="route-files">${section.files.map(f => fileLink(f, f.path)).join('')}</div></div>`;
-    }).join('') || '<p>No matching files</p>';
-  } else {
+  $('#sidebar-heading').textContent = 'Changed files';
+  {
     const root = compactFileTree(files().filter(f => f.path.toLowerCase().includes(query)));
     const branch = nodes => nodes.map(node => node.children ? `<details open><summary title="${esc(node.name)}">${esc(node.name)}</summary><div>${branch(node.children)}</div></details>` : fileLink(node.file, node.name)).join('');
     $('#tree').innerHTML = branch(root) || '<p>No matching files</p>';
@@ -133,21 +129,17 @@ function startReplies() {
 function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 function fileCard(f) {
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div>${state.mode === 'route' ? `<span class="footnote" title="${esc(f.route.evidence)}">${esc(f.route.layer)}</span>` : ''}<label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
-  const sections = changeSections(files(), query), groups = new Set(sections.map(s => s.group));
-  const list = state.mode === 'route' ? sections.flatMap(s => s.files) : files().filter(f => f.path.toLowerCase().includes(query)).sort((a,b) => a.path.localeCompare(b.path));
-  const label = section => (groups.size > 1 ? section.group + ' / ' : '') + section.layer;
-  const cards = state.mode === 'route' ? sections.map((section, i) => `<section class="route-section" id="${section.id}" aria-labelledby="${section.id}-title"><div class="layer-heading"><b>${i+1}</b><h2 id="${section.id}-title">${esc(label(section))}</h2><span>${section.files.length} ${section.files.length === 1 ? 'file' : 'files'}</span></div>${section.files.map(fileCard).join('')}</section>`).join('') : list.map(fileCard).join('');
-  $('#feed').innerHTML = cards || `<div class="empty">${session ? 'No changes to display' : local ? 'Connecting to your repository…' : 'Run <code>trace-review</code> inside your Git repository to open a local review.'}</div>`;
-  $('#route-links').innerHTML = sections.map(section => `<a href="#${section.id}">${esc(label(section))}</a>`).join('<span>→</span>');
-  $('#route-explanation').textContent = list.some(f => f.route.layer !== 'Other changes') ? 'The same diff, grouped by package and responsibility. Follow the stages below; files inside each stage stay in path order. Roles are inferred from manifests, imports and naming conventions, not a call graph.' : 'No supported framework or file role was identified in these changes. All files stay visible under Other changes, in path order. Change route will look similar to Files for this diff.';
+  if(state.mode === 'graph') { renderGraph(); return; }
+  const list = files().filter(f => f.path.toLowerCase().includes(query)).sort((a,b) => a.path.localeCompare(b.path));
+  $('#feed').innerHTML = list.map(fileCard).join('') || '<div class="empty">No changes to display</div>';
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'route'); $('#route-info').hidden = state.mode !== 'route'; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); completionButtons(); }
-function jump(id) { const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
+function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'graph'); $('#route-info').hidden = true; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); completionButtons(); }
+function jump(id) { if(state.mode === 'graph') { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.file) jump(b.dataset.file);
@@ -165,10 +157,11 @@ document.addEventListener('submit', e => {
   else review().comments.push({id: crypto.randomUUID(), path: f.path, index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body, resolved: false});
   delete review().drafts[editor]; editor = null; editId = null; persist(); renderFeed(); counts(); toast('Comment added to review');
 });
-document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) review().done.push(path); persist(); tree(); counts(); } });
+document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) review().done.push(path); persist(); tree(); counts(); if(state.mode === 'graph') renderGraph(); } });
 $('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
-for (const mode of ['files', 'route']) $('#' + mode + '-mode').onclick = () => { state.mode = mode; persist(); render(); };
+for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
+$('#toggle-sidebar').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); render(); };
 function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; $('#download').disabled = !hasFeedback; }
@@ -206,7 +199,7 @@ async function loadSession() {
     const res = await fetch('/api/session'); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
     const next = await res.json(); if (next.sessionId !== session?.sessionId) submitted = false; session = next;
     $('#repo').textContent = session.repo; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
-    $('#detected').textContent = [...new Set(files().map(f => f.route.group).filter(g => g !== 'Other changes'))].join(' · ') || 'Automatic route';
+    $('#detected').textContent = 'Local dependency graph';
     clearInterval(replyTimer); activeReview = null; submitted = false; $('#instruction').disabled = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
     $('#refresh').hidden = false; editor = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
@@ -214,6 +207,167 @@ async function loadSession() {
   } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();
+let selectedNode = null, openedNode = null, revealedNodes = new Set(), expandedNodes = new Set(), graphRevision = null, draggedPositions = new Map(), suppressNodeClickUntil = 0, graphScale = 1;
+function selectGraphNode(path) {
+  if(performance.now() < suppressNodeClickUntil) return;
+  revealedNodes = revealGraphPath(revealedNodes, path, session?.graph?.edges || []);
+  expandedNodes.add(path);
+  selectedNode = openedNode = path;
+  editor = null; editId = null;
+  renderGraph();
+  if($('#feed .graph-detail')) $('#feed .graph-detail').scrollTop = 0;
+}
+function resetGraph() {
+  selectedNode = openedNode = null;
+  revealedNodes.clear(); expandedNodes.clear(); draggedPositions.clear(); graphScale = 1; editor = null; editId = null;
+  query = ''; $('#search').value = '';
+  state.sidebarCollapsed = true;
+  applySidebarWidth(); tree();
+  renderGraph();
+  $('#feed .graph-viewport').scrollLeft = 0;
+  $('#feed .graph-viewport').scrollTop = 0;
+  $('#feed').scrollIntoView({block:'start'});
+}
+function renderGraph() {
+  const scrollLeft = $('#feed .graph-viewport')?.scrollLeft || 0;
+  const scrollTop = $('#feed .graph-viewport')?.scrollTop || 0;
+  const detailScroll = $('#feed .graph-detail')?.scrollTop || 0;
+  const graph = session?.graph || {nodes:[], edges:[], sources:{}};
+  if(graphRevision !== session?.revision) {
+    graphRevision = session?.revision;
+    selectedNode = openedNode = null; revealedNodes.clear(); expandedNodes.clear(); draggedPositions.clear(); graphScale = 1;
+  }
+  const visible = graph.nodes.filter(n => !review().done.includes(n.path) && (n.changed || revealedNodes.has(n.path)) && (!query || n.path.toLowerCase().includes(query)));
+  const layout = stableGraphLayout(graph.nodes, graph.edges);
+  const {positions, branches} = layout;
+  for(const [path, point] of draggedPositions) if(positions.has(path)) positions.set(path, point);
+  const width=Math.max(layout.width,...[...positions.values()].map(p=>p.x+160));
+  const height=Math.max(layout.height,...[...positions.values()].map(p=>p.y+80));
+  const pairs = new Map();
+  for(const e of graph.edges) {
+    if((!branches.has(JSON.stringify([e.source,e.target])) && !expandedNodes.has(e.source) && !expandedNodes.has(e.target)) || !visible.some(n=>n.path===e.source) || !visible.some(n=>n.path===e.target)) continue;
+    const key=JSON.stringify([e.source,e.target]);
+    if(!pairs.has(key))pairs.set(key,[]);pairs.get(key).push(e);
+  }
+  const routes = routeGraphEdges(graph.edges, positions);
+  const displayedEdges = [...pairs.values()].flat();
+  const lines = displayedEdges.map((e,index) => {
+    const a=positions.get(e.source), b=positions.get(e.target), route=routes.get(e);
+    const context=!graph.nodes.find(n=>n.path===e.source)?.changed || !graph.nodes.find(n=>n.path===e.target)?.changed;
+    const test=graph.nodes.find(n=>n.path===e.source)?.test || 'code';
+    return `<g data-graph-edge="${index}" class="graph-edge ${context?'context':''} ${esc(test)}"><title>${esc(e.kind)}${e.change?' '+esc(e.change):''} · ${esc(e.source)} → ${esc(e.target)}</title><path d="${route.path}" fill="none" stroke="currentColor" stroke-width="1.5" ${e.kind==='Calls'?'stroke-dasharray="7 4"':e.kind==='Uses type'?'stroke-dasharray="2 5"':''}/>${e.change?`<text x="${route.lane+3}" y="${route.ty-7}">${esc(e.change)}</text>`:''}</g>`;
+  }).join('');
+  const related=graph.edges.filter(e=>e.source===selectedNode || e.target===selectedNode);
+  const connections=selectedNode && related.length ? `<details class="graph-connections" open><summary>Connections (${related.length})</summary>${related.map(e=>`<button class="graph-connection" data-select-related="${esc(e.source===selectedNode?e.target:e.source)}"><span>${esc(e.source===selectedNode?'→':'←')} ${esc(e.source===selectedNode?e.target:e.source)}</span><small>${esc(e.kind)} ${esc(e.change||'')}</small></button>`).join('')}</details>` : '';
+  const nodes=visible.map(n=>{const p=positions.get(n.path); const commentCount=fileCommentCount(review().comments,n.path); const status=({'A':'+','?':'+','M':'~','D':'−','R':'→'})[n.status] || '';return `<g role="button" tabindex="0" aria-label="Select ${esc(n.path)}" data-node="${esc(n.path)}" class="graph-node ${esc(n.test)} ${n.changed?'':'context'} ${selectedNode===n.path?'selected':''}" transform="translate(${p.x-115},${p.y-24})"><title>${esc(n.oldPath ? n.oldPath+' → '+n.path : n.path)}</title><rect width="230" height="48" rx="9"/><text x="12" y="20">${esc(n.icon)} ${esc(n.path.split('/').at(-1).slice(0,23))}</text><text class="graph-path" x="12" y="37">${esc(n.path.length>32?'…'+n.path.slice(-31):n.path)}</text><text x="211" y="20">${status}</text>${commentCount?`<g class="graph-comment-badge" aria-label="${commentCount} comments"><title>${commentCount} comments</title><rect x="210" y="29" width="${commentCount>99?34:26}" height="22" rx="11"/><text x="${commentCount>99?227:223}" y="44" text-anchor="middle">${commentCount>99?'99+':commentCount}</text></g>`:''}</g>`;}).join('');
+  $('#feed').innerHTML=`<div class="graph-layout"><section class="graph-canvas"><div class="graph-legend"><span class="code">● Code</span><span class="unit">● Unit</span><span class="integration">● Integration</span><span class="e2e">● E2E</span><span>● Unclassified test</span><span>━ Imports</span><span>┄ Calls</span><span>··· Uses type</span></div><p class="footnote">Select a node to reveal connected context. Tree branches group dependencies. All connections, including cycles and shared dependencies, appear below the selected file.</p><div class="graph-selection"><span>${esc(selectedNode || 'Select a file')}</span><div class="graph-controls" role="group" aria-label="Graph controls"><button id="graph-zoom-out" aria-label="Zoom out">−</button><output id="graph-zoom-value" aria-live="polite">${Math.round(graphScale*100)}%</output><button id="graph-zoom-in" aria-label="Zoom in">+</button><button id="reset-graph" title="Return to the initial review graph">Reset graph</button></div></div><div class="graph-viewport" tabindex="0" aria-label="Graph canvas"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" style="width:${width*graphScale}px;height:${height*graphScale}px;min-width:0" aria-label="File dependency graph">${lines}${nodes}</svg></div>${connections}${!visible.length?'<p>No changed files to display.</p>':''}</section>${openedNode?'<div id="graph-detail-resizer" role="separator" tabindex="0" aria-label="Resize file preview" aria-orientation="vertical" aria-controls="graph-file-content" title="Drag to resize file preview"></div><section class="graph-detail"><button id="close-graph-file" aria-label="Close file">× Close file</button><div id="graph-file-content"></div></section>':''}</div>`;
+  const viewport=$('#feed .graph-viewport'), graphSvg=$('#feed .graph-svg');
+  viewport.scrollLeft=scrollLeft; viewport.scrollTop=scrollTop;
+  function zoomTo(value,clientX,clientY) {
+    const bounds=viewport.getBoundingClientRect();
+    const x=clientX===undefined?viewport.clientWidth/2:clientX-bounds.left;
+    const y=clientY===undefined?viewport.clientHeight/2:clientY-bounds.top;
+    const next=graphZoom(value), ratio=next/graphScale;
+    const left=(viewport.scrollLeft+x)*ratio-x, top=(viewport.scrollTop+y)*ratio-y;
+    graphScale=next;
+    graphSvg.style.width=width*graphScale+'px';graphSvg.style.height=height*graphScale+'px';
+    viewport.scrollLeft=left;viewport.scrollTop=top;
+    $('#graph-zoom-value').textContent=Math.round(graphScale*100)+'%';
+    $('#graph-zoom-in').disabled=graphScale>=3;$('#graph-zoom-out').disabled=graphScale<=.25;
+  }
+  $('#graph-zoom-in').onclick=()=>zoomTo(graphScale*1.2);
+  $('#graph-zoom-out').onclick=()=>zoomTo(graphScale/1.2);
+  viewport.addEventListener('wheel',e=>{
+    if(!e.ctrlKey)return;
+    e.preventDefault();
+    zoomTo(graphScale*Math.exp(-e.deltaY*.01),e.clientX,e.clientY);
+  },{passive:false});
+  let gestureScale=1;
+  viewport.addEventListener('gesturestart',e=>{e.preventDefault();gestureScale=graphScale;},{passive:false});
+  viewport.addEventListener('gesturechange',e=>{e.preventDefault();zoomTo(gestureScale*e.scale,e.clientX,e.clientY);},{passive:false});
+  viewport.addEventListener('gestureend',e=>e.preventDefault(),{passive:false});
+  $('#reset-graph').onclick = resetGraph;
+  $('#feed').querySelectorAll('[data-node]').forEach(el=>{
+    const path=el.dataset.node;
+    el.onclick=()=>selectGraphNode(path);
+    el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectGraphNode(path);}};
+    let drag=null;
+    const svg=el.ownerSVGElement;
+    const point=e=>new DOMPoint(e.clientX,e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    el.onpointerdown=e=>{
+      if(e.button!==0)return;
+      drag={start:point(e), original:{...positions.get(path)}, moved:false};
+      el.setPointerCapture(e.pointerId);
+    };
+    el.onpointermove=e=>{
+      if(!drag)return;
+      const p=point(e),dx=p.x-drag.start.x,dy=p.y-drag.start.y;
+      if(!drag.moved && Math.hypot(dx,dy)<4)return;
+      drag.moved=true; el.classList.add('dragging');
+      const next={x:Math.max(135,drag.original.x+dx),y:Math.max(45,drag.original.y+dy)};
+      positions.set(path,next); draggedPositions.set(path,next);
+      el.setAttribute('transform',`translate(${next.x-115},${next.y-24})`);
+      const updated=routeGraphEdges(graph.edges,positions);
+      $('#feed').querySelectorAll('[data-graph-edge]').forEach(group=>{
+        const route=updated.get(displayedEdges[+group.dataset.graphEdge]);
+        group.querySelector('path').setAttribute('d',route.path);
+        const label=group.querySelector('text');
+        if(label){label.setAttribute('x',route.lane+3);label.setAttribute('y',route.ty-7);}
+      });
+    };
+    const finish=e=>{
+      if(!drag)return;
+      const moved=drag.moved;drag=null;
+      if(el.hasPointerCapture(e.pointerId))el.releasePointerCapture(e.pointerId);
+      if(moved){suppressNodeClickUntil=performance.now()+250;renderGraph();}
+    };
+    el.onpointerup=finish;el.onpointercancel=finish;
+  });
+  $('#feed').querySelectorAll('[data-select-related]').forEach(el=>el.onclick=()=>{selectGraphNode(el.dataset.selectRelated);});
+
+  const detailResizer=$('#graph-detail-resizer');
+  if(detailResizer){
+    const container=$('#feed .graph-layout'), detail=$('#feed .graph-detail');
+    function setDetailWidth(value){
+      const max=Math.max(240,container.clientWidth-160);
+      const next=Math.max(240,Math.min(max,value));
+      detail.style.flexBasis=next+'px';
+      detailResizer.setAttribute('aria-valuemin','240');
+      detailResizer.setAttribute('aria-valuemax',String(Math.round(max)));
+      detailResizer.setAttribute('aria-valuenow',String(Math.round(next)));
+      return next;
+    }
+    setDetailWidth(Number(state.graphDetailWidth)||container.clientWidth*.48);
+    let resizeStart=null;
+    detailResizer.onpointerdown=e=>{
+      if(e.button!==0)return;
+      e.preventDefault();resizeStart={x:e.clientX,width:detail.getBoundingClientRect().width};
+      detailResizer.setPointerCapture(e.pointerId);document.body.classList.add('resizing-graph-detail');
+    };
+    detailResizer.onpointermove=e=>{
+      if(!resizeStart)return;
+      state.graphDetailWidth=setDetailWidth(resizeStart.width+resizeStart.x-e.clientX);
+    };
+    const stopResize=e=>{
+      if(!resizeStart)return;resizeStart=null;
+      if(detailResizer.hasPointerCapture(e.pointerId))detailResizer.releasePointerCapture(e.pointerId);
+      document.body.classList.remove('resizing-graph-detail');persist();
+    };
+    detailResizer.onpointerup=stopResize;detailResizer.onpointercancel=stopResize;
+    detailResizer.onlostpointercapture=()=>{resizeStart=null;document.body.classList.remove('resizing-graph-detail');};
+    detailResizer.onkeydown=e=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;
+      e.preventDefault();
+      state.graphDetailWidth=setDetailWidth(e.key==='Home'?240:e.key==='End'?container.clientWidth:detail.getBoundingClientRect().width+(e.key==='ArrowLeft'?20:-20));persist();
+    };
+    detailResizer.ondblclick=()=>{state.graphDetailWidth=setDetailWidth(container.clientWidth*.48);persist();};
+  }
+  if($('#close-graph-file')) $('#close-graph-file').onclick=()=>{openedNode=null;renderGraph();};
+  if(openedNode){const f=files().find(f=>f.path===openedNode);$('#graph-file-content').innerHTML=f && f.status !== 'D'?fileCard(f):`<div class="file-header">${esc(openedNode)}${f?.status === 'D' ? ' · Previous version' : ''}</div><pre class="graph-source"><code>${esc(graph.sources[openedNode] ?? 'Source preview unavailable (binary, oversized or unreadable file).')}</code></pre>`;}
+  if($('#feed .graph-detail')) $('#feed .graph-detail').scrollTop = detailScroll;
+  $('#summary').textContent=`${visible.filter(n=>n.changed).length} changed files · ${visible.filter(n=>!n.changed).length} context files`;
+}
+
 render(); if (local) loadSession();
 
 function completionButtons() {

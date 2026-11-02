@@ -1,10 +1,19 @@
 <h1 align="center"><img src="dist/logo.svg" width="28" height="32" alt="Fir tree"> Trace</h1>
 
-Local code review for Codex and Claude Code. Follow changes in a useful order, leave line comments, and get the agent’s replies in the same threads.
+Local code review for **Codex and Claude Code**. Explore a dependency graph, comment on the diff, and send actionable feedback back to your agent.
 
-<p><img src="docs/assets/icons/react.svg" width="32" height="32" alt="React"> &nbsp; <img src="docs/assets/icons/vuejs.svg" width="32" height="32" alt="Vue"> &nbsp; <img src="docs/assets/icons/angular.svg" width="32" height="32" alt="Angular"> &nbsp; <img src="docs/assets/icons/nestjs.svg" width="32" height="32" alt="NestJS"> &nbsp; <img src="docs/assets/icons/fastapi.svg" width="32" height="32" alt="FastAPI"> &nbsp; <img src="docs/assets/icons/spring.svg" width="32" height="32" alt="Spring"> &nbsp; <img src="docs/assets/icons/android.svg" width="32" height="32" alt="Android"> &nbsp; <img src="docs/assets/icons/swift.svg" width="32" height="32" alt="SwiftUI / UIKit"> &nbsp; <img src="docs/assets/icons/flutter.svg" width="32" height="32" alt="Flutter"></p>
+![Trace Graph: reveal unchanged dependencies and tests, inspect code, and leave inline feedback](docs/assets/graph-review.gif)
 
-![Switching from Files to Change route and following outlined stages in an example React project](docs/assets/change-route.gif)
+## See what changed and what it touches
+
+**Graph starts with changed files and reveals connected context when you select a node.** Spot the useful gap: code changed, an existing test covers it, but that test is absent from the diff. Open that test beside the graph and check what it actually verifies.
+
+- **Review in context.** Select a file to open its diff or unchanged source on the right. Imports, calls and type-only imports have distinct lines; test categories have distinct colors.
+- **Keep your place.** Expand dependencies without moving existing nodes, drag nodes, zoom with buttons or a trackpad, and resize the file preview.
+- **Track the review.** Comment counts appear on nodes. Viewed files leave the graph; Reset graph clears exploration while preserving comments and Viewed marks.
+- **Close the loop with your agent.** Send line comments to Codex or Claude Code, read replies in the same threads, inspect fixes and **Approve**.
+
+Graph analysis currently covers relative JavaScript/TypeScript dependencies. Test categories use explicit project directory conventions or configuration; generic test filenames stay unclassified. [Graph behavior and analysis limits](docs/graph.md).
 
 ## Getting started
 
@@ -44,7 +53,7 @@ trace-review
 
 - **Review local changes.** Inspect the working tree, or run `trace-review --staged` for staged changes.
 - **Review a branch.** Run `trace-review --base origin/main --merge-base` against a locally available base ref.
-- **Follow the change route.** Switch from folders to architectural stages detected from framework and file conventions. Only stages with changed files appear.
+- **Explore the graph.** Start with changed files, reveal unchanged neighbors on selection, and compare import, call and type dependencies against the base revision.
 - **Request and verify fixes.** Add line comments, send them to your agent, read its replies in each thread, then inspect the latest changes and **Approve**.
 
 ## License

@@ -1,7 +1,7 @@
 {
   "name": "trace-review",
-  "version": "0.2.4",
-  "description": "Local Git review with change routes and feedback for coding agents",
+  "version": "0.3.0",
+  "description": "Local code review with dependency graphs and threaded feedback for Codex and Claude Code",
   "license": "MIT",
   "private": true,
   "type": "module",
