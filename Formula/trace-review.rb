@@ -1,11 +1,11 @@
 class TraceReview < Formula
-  desc "Local Git review with change routes and feedback for coding agents"
+  desc "Local Git review with dependency graphs and feedback for coding agents"
   homepage "https://github.com/dmydary-code/trace"
   license "MIT"
   url "https://github.com/dmydary-code/trace.git",
-      tag: "v0.2.4",
-      revision: "275ec18fcf7c9835a5770c52311b42555ffce2ab"
-  version "0.2.4"
+      tag: "v0.3.0",
+      revision: "4e252f27b67e9294cbffdf2858dc8995a4f72d30"
+  version "0.3.0"
 
   depends_on "node@22"
   depends_on "git"
