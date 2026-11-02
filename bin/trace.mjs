@@ -6,6 +6,7 @@ import {spawn, fork, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createTraceServer} from '../server.mjs';
 import {openRepository} from '../lib/git.mjs';
+import {gitOutput} from '../lib/git-command.mjs';
 import {readReview, readSnapshot, addReply} from '../lib/reviews.mjs';
 
 const root = process.env.TRACE_BUNDLE_HOME || dirname(dirname(fileURLToPath(import.meta.url)));
@@ -96,7 +97,7 @@ try {
     if (options.json) emit(reply); else console.log(`Reply saved to comment ${reply.commentId} in review ${reply.reviewId}.`);
   } else if (command === 'doctor') {
     const tools = {};
-    for (const name of ['git', 'codex', 'claude']) tools[name] = await exec(name, ['--version'], {timeout: 10000}).then(r => r.stdout.trim(), () => 'unavailable');
+    for (const name of ['git', 'codex', 'claude']) tools[name] = await (name === 'git' ? gitOutput(['--version']) : exec(name, ['--version'], {timeout:10000}).then(r => r.stdout)).then(value => value.trim(), error => error.message);
     const repository = await openRepository(options.repo).then(r => r.repo, () => null);
     const report = {version, node: process.version, repository, tools};
     if (options.json) emit(report); else console.log(JSON.stringify(report, null, 2));

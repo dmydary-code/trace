@@ -221,3 +221,24 @@ test('reopening a review retains its baseline after HEAD advances', async t => {
   assert.equal(current.files.length,1);
   assert.ok(current.files[0].lines.some(l => l.kind === 'add' && l.text.includes('2')));
 });
+
+test('Xcode license failure during submission leaves the review open for retry', async t => {
+ const {repo}=await fixture(t);
+ await writeFile(join(repo,'file.ts'),'export const count = 2;\n');
+ const realGit=(await exec('which',['git'])).stdout.trim();
+ const marker=join(repo,'.git','license-blocked'), wrapper=join(repo,'.git','test-git');
+ await writeFile(wrapper,`#!${process.execPath}\nconst fs=require('node:fs');if(fs.existsSync(${JSON.stringify(marker)})){console.error('You have not agreed to the Xcode license agreement');process.exit(69);}const r=require('node:child_process').spawnSync(${JSON.stringify(realGit)},process.argv.slice(2),{stdio:'inherit'});process.exit(r.status??1);\n`,{mode:0o755});
+ const old=process.env.TRACE_GIT_BIN; process.env.TRACE_GIT_BIN=wrapper;
+ let viewer;
+ try {
+  viewer=await createTraceServer({repo,port:0});
+  const s=await (await fetch(viewer.url+'/api/session')).json();
+  const f=s.files.find(f=>f.path==='file.ts'),index=f.lines.findIndex(l=>l.kind==='add');
+  const packet={revision:s.revision,comments:[{path:f.path,index,line:f.lines[index].new,side:'new',body:'Check the count'}]};
+  const post=()=>fetch(viewer.url+'/api/reviews',{method:'POST',headers:{'Content-Type':'application/json',Origin:viewer.url,'X-Trace-Token':s.token},body:JSON.stringify(packet)});
+  await writeFile(marker,'blocked');
+  const failed=await post(); assert.equal(failed.status,400); assert.match((await failed.json()).error,/Xcode license agreement/);
+  await rm(marker);
+  const retry=await post(); assert.equal(retry.status,201); assert.equal((await retry.json()).review.comments[0].body,'Check the count');
+ } finally { if(viewer) await viewer.close(); if(old===undefined)delete process.env.TRACE_GIT_BIN;else process.env.TRACE_GIT_BIN=old; }
+});

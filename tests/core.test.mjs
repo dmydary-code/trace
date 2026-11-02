@@ -52,3 +52,16 @@ test('route navigation contains only touched stages and keeps package boundaries
  assert.deepEqual(changeSections(source,'test').map(s => s.layer), ['Tests']);
  assert.deepEqual(changeSections(source,'no-such-file'), []);
 });
+
+test('compact folders stop at a file or a branch and retain every file', async () => {
+ const {compactFileTree} = await import('../dist/core.mjs');
+ const files = ['src/app/features/cart/ui/Button.tsx','src/app/features/cart/model/cart.ts','src/app/features/cart/index.ts','tests/unit/cart.test.ts'].map((path,i)=>({path,id:String(i)}));
+ const tree = compactFileTree(files);
+ assert.equal(tree[0].name,'src/app/features/cart');
+ assert.deepEqual(tree[0].children.map(n=>n.name),['index.ts','model','ui']);
+ assert.equal(tree[1].name,'tests/unit');
+ const flatten = nodes => nodes.flatMap(n=>n.children?flatten(n.children):[n.file]);
+ assert.deepEqual(flatten(tree).map(f=>f.path).sort(), files.map(f=>f.path).sort());
+ assert.equal(compactFileTree([{path:'path/path/file.ts'}])[0].name,'path/path');
+ assert.deepEqual(compactFileTree([]),[]);
+});

@@ -8,6 +8,7 @@ class Trace < Formula
   version "0.2.2"
 
   depends_on "node@22"
+  depends_on "git"
 
   def install
     libexec.install "bin", "lib", "dist", "server.mjs", "package.json",
@@ -15,6 +16,7 @@ class Trace < Formula
     (bin/"trace-review").write <<~SH
       #!/bin/sh
       export TRACE_BUNDLE_HOME="#{opt_libexec}"
+      export TRACE_GIT_BIN="#{Formula["git"].opt_bin}/git"
       exec "#{Formula["node@22"].opt_bin}/node" "#{opt_libexec}/bin/trace.mjs" "$@"
     SH
     ln_s "trace-review", bin/"trace"

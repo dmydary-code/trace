@@ -1,6 +1,6 @@
 {
   "name": "trace",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Review local Git changes with automatic change routes and threaded replies from your coding agent.",
   "skills": "./skills/",
   "author": {

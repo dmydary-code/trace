@@ -89,3 +89,25 @@ export function changeSections(files, query = '') {
  }
  return sections;
 }
+
+// Fold directory-only chains, stopping at files or branches.
+export function compactFileTree(files) {
+ const root = new Map();
+ for (const file of files) {
+  const parts = file.path.split('/'); let node = root;
+  parts.forEach((part, i) => {
+   if (i === parts.length - 1) node.set(part, file);
+   else { if (!node.has(part)) node.set(part, new Map()); node = node.get(part); }
+  });
+ }
+ const fold = node => [...node].sort(([a],[b]) => a.localeCompare(b)).map(([name,value]) => {
+  if (!(value instanceof Map)) return {name,file:value};
+  while (value.size === 1) {
+   const [child,next] = value.entries().next().value;
+   if (!(next instanceof Map)) break;
+   name += '/' + child; value = next;
+  }
+  return {name,children:fold(value)};
+ });
+ return fold(root);
+}

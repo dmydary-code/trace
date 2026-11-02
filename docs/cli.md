@@ -38,6 +38,12 @@ trace-review --agent codex
 
 This explicitly starts a separate `codex exec` process on submission with the `workspace-write` sandbox. It is independent of the calling conversation and cannot be combined with `--wait`. The Codex and Claude plugins use the same-session feedback loop instead.
 
+## Git on macOS
+
+The Homebrew package installs Git as a dependency and selects it explicitly, so Trace does not depend on Apple's Xcode Git launcher. For source installs, `TRACE_GIT_BIN=/absolute/path/to/git` selects a Git executable. When the default Git reports an Xcode license error, Trace tries Homebrew Git in the standard macOS locations.
+
+If no working Git is available, Trace shows recovery instructions. Install Git with `brew install git`, or review and accept Apple's license yourself in Xcode, then retry the review submission. A failed submission does not close the review or clear its comments.
+
 ## Local behavior
 
 Trace binds only to `127.0.0.1`. Review submission requires the matching Host, Origin, and per-session token. The server rechecks the Git revision and line anchors before accepting feedback. It does not serve arbitrary repository files or execute repository scripts. Refresh the diff if code changes during review.

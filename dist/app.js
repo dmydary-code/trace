@@ -1,4 +1,4 @@
-import {reviewPrompt, changeSections} from './core.mjs';
+import {reviewPrompt, changeSections, compactFileTree} from './core.mjs';
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
@@ -10,6 +10,36 @@ const key = () => session ? `${session.repositoryId}:${session.verifying && acti
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
 const files = () => session?.files || [];
 function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Export your review.'); } }
+function sidebarWidth(value) { return Math.max(180, Math.min(Number(value) || 266, 640, window.innerWidth - 320)); }
+function applySidebarWidth() {
+ const width = sidebarWidth(state.sidebarWidth);
+ document.documentElement.style.setProperty('--sidebar-width', width + 'px');
+ $('#sidebar-resizer').setAttribute('aria-valuenow', Math.round(width));
+ $('#sidebar-resizer').setAttribute('aria-valuemax', Math.max(180, Math.min(640, window.innerWidth - 320)));
+}
+const resizer = $('#sidebar-resizer');
+resizer.onpointerdown = event => {
+ if (event.button !== 0) return;
+ event.preventDefault(); resizer.setPointerCapture(event.pointerId); document.body.classList.add('resizing-sidebar');
+};
+resizer.onpointermove = event => {
+ if (!resizer.hasPointerCapture(event.pointerId)) return;
+ state.sidebarWidth = sidebarWidth(event.clientX); applySidebarWidth();
+};
+function finishResize(event) {
+ if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+ document.body.classList.remove('resizing-sidebar'); persist();
+}
+resizer.onpointerup = finishResize; resizer.onpointercancel = finishResize;
+resizer.onlostpointercapture = () => document.body.classList.remove('resizing-sidebar');
+resizer.onkeydown = event => {
+ if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+ event.preventDefault();
+ state.sidebarWidth = event.key === 'Home' ? 180 : event.key === 'End' ? 640 : sidebarWidth(state.sidebarWidth) + (event.key === 'ArrowRight' ? 20 : -20);
+ applySidebarWidth(); persist();
+};
+resizer.ondblclick = () => { state.sidebarWidth = 266; applySidebarWidth(); persist(); };
+window.addEventListener('resize', applySidebarWidth);
 function toast(message) { $('#toast').textContent = message; $('#toast').style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').style.display = 'none', 4000); }
 function applyTheme() { document.documentElement.dataset.theme = state.theme; $('#theme').textContent = state.theme === 'dark' ? '☀' : '☾'; $('#theme').setAttribute('aria-label', state.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'); }
 const icons = {
@@ -49,13 +79,8 @@ function tree() {
       return groupLabel + `<div class="route-group"><a class="route-stage ${section.files.some(f => f.path === activePath) ? 'active' : ''}" href="#${section.id}">${icon(layerIcon(section.layer))}<span>${esc(section.layer)}</span><small>${section.files.length}</small></a><div class="route-files">${section.files.map(f => fileLink(f, f.path)).join('')}</div></div>`;
     }).join('') || '<p>No matching files</p>';
   } else {
-    // Maps avoid confusing directory names such as "path" with a file object.
-    const root = new Map();
-    for (const f of files().filter(f => f.path.toLowerCase().includes(query))) {
-      let node = root; const parts = f.path.split('/');
-      parts.forEach((part, i) => { if (i === parts.length - 1) node.set(part, f); else { if (!node.has(part)) node.set(part, new Map()); node = node.get(part); } });
-    }
-    const branch = node => [...node].sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => value instanceof Map ? `<details open><summary>${esc(name)}</summary><div>${branch(value)}</div></details>` : fileLink(value, name)).join('');
+    const root = compactFileTree(files().filter(f => f.path.toLowerCase().includes(query)));
+    const branch = nodes => nodes.map(node => node.children ? `<details open><summary title="${esc(node.name)}">${esc(node.name)}</summary><div>${branch(node.children)}</div></details>` : fileLink(node.file, node.name)).join('');
     $('#tree').innerHTML = branch(root) || '<p>No matching files</p>';
   }
   $('#file-count').textContent = files().length;
@@ -121,7 +146,7 @@ function renderFeed() {
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'route'); $('#route-info').hidden = state.mode !== 'route'; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); completionButtons(); }
+function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'route'); $('#route-info').hidden = state.mode !== 'route'; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); completionButtons(); }
 function jump(id) { const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
