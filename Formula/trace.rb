@@ -1,6 +1,7 @@
 class Trace < Formula
   desc "Local Git review with change routes and feedback for coding agents"
   homepage "https://github.com/dmydary-code/trace"
+  license "MIT"
   url "https://github.com/dmydary-code/trace.git",
       tag: "v0.2.1",
       revision: "95932ab2803b35e7fcc8875ab278ff6def23fb47"

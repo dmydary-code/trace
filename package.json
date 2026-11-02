@@ -2,6 +2,7 @@
   "name": "trace-review",
   "version": "0.2.1",
   "description": "Local Git review with change routes and feedback for coding agents",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {

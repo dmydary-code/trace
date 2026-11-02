@@ -1,5 +1,13 @@
 # CLI and local behavior
 
+## Installation
+
+Install and authenticate Codex or Claude Code separately. Run `trace-review install codex` or `trace-review install claude` to register just one integration, or `trace-review install all` for both. Restart the agent after installation.
+
+If the repository is private, authenticate a GitHub account with repository access using `gh auth login`, then run `gh auth setup-git --hostname github.com` before installing the Homebrew tap.
+
+To update, run `brew update`, `brew upgrade dmydary-code/trace/trace`, and `trace-review install all`, then restart the agent.
+
 ## Standalone CLI
 
 ```sh
