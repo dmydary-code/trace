@@ -11,7 +11,7 @@ Local code review for **Codex and Claude Code**. Explore a dependency graph, com
 - **Review in context.** Select a file to open its diff or unchanged source on the right. Imports, calls and type-only imports have distinct lines; test categories have distinct colors.
 - **Keep your place.** Expand dependencies without moving existing nodes, drag nodes, zoom with buttons or a trackpad, and resize the file preview.
 - **Track the review.** Comment counts appear on nodes. Viewed files leave the graph; Reset graph clears exploration while preserving comments and Viewed marks.
-- **Close the loop with your agent.** Send line comments to Codex or Claude Code, read replies in the same threads, inspect fixes and **Approve**.
+- **Close the loop with your agent.** Send line comments to Codex or Claude Code, read replies in the same threads, inspect fixes and **Approve**. Approval records your confirmation and lets you continue with another round of feedback.
 
 Graph analysis currently covers relative JavaScript/TypeScript dependencies. Test categories use explicit project directory conventions or configuration; generic test filenames stay unclassified. [Graph behavior and analysis limits](docs/graph.md).
 

@@ -60,6 +60,19 @@ export async function createTraceServer(options = {}) {
         if (currentMatch[1] !== submittedId) return json(res, 404, {error: 'Review not open in this viewer'});
         return json(res, 200, {...await currentSnapshot(), verifying: true});
       }
+      const continueMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/continue$/);
+      if(req.method==='POST' && continueMatch){
+        if(req.headers['x-trace-token']!==token || req.headers.origin!==origin)return json(res,403,{error:'Open the review on the local server'});
+        if(running || continueMatch[1]!==submittedId)return json(res,409,{error:'Review cannot be continued yet'});
+        running=true;
+        try {
+          const previous=await readReview(repository.gitDir,submittedId);
+          if(previous.outcome!=='approved' && !previous.completion)return json(res,409,{error:'Approve this review before continuing'});
+          const next=await currentSnapshot();
+          submitted=false;submittedId=null;
+          return json(res,200,next);
+        } finally {running=false;}
+      }
       const approveMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/approve$/);
       if (req.method === 'POST' && approveMatch) {
         if (req.headers['x-trace-token'] !== token || req.headers.origin !== origin) return json(res, 403, {error: 'Open the review on the local server'});

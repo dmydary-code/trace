@@ -242,3 +242,16 @@ test('Xcode license failure during submission leaves the review open for retry',
   const retry=await post(); assert.equal(retry.status,201); assert.equal((await retry.json()).review.comments[0].body,'Check the count');
  } finally { if(viewer) await viewer.close(); if(old===undefined)delete process.env.TRACE_GIT_BIN;else process.env.TRACE_GIT_BIN=old; }
 });
+
+test('approved review can continue with new feedback while approval stays saved',async t=>{
+ const {repo}=await fixture(t);const app=await createTraceServer({repo});t.after(()=>app.close());
+ const session=await(await fetch(app.url+'/api/session')).json();
+ const headers={Origin:app.url,'X-Trace-Token':session.token};
+ const approved=await(await fetch(app.url+'/api/reviews',{method:'POST',headers,body:JSON.stringify({revision:session.revision,comments:[],outcome:'approved'})})).json();
+ const continued=await fetch(app.url+`/api/reviews/${approved.id}/continue`,{method:'POST',headers});assert.equal(continued.status,200);
+ const next=await continued.json();
+ const feedback=await fetch(app.url+'/api/reviews',{method:'POST',headers,body:JSON.stringify({revision:next.revision,comments:[],instruction:'Please also handle the empty input.',outcome:'changes_requested'})});
+ assert.equal(feedback.status,201);
+ const saved=await(await fetch(app.url+`/api/reviews/${approved.id}`)).json();assert.equal(saved.outcome,'approved');
+ const retry=await fetch(app.url+`/api/reviews/${approved.id}/continue`,{method:'POST',headers});assert.equal(retry.status,409);
+});

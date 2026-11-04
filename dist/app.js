@@ -7,12 +7,13 @@ let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}
 const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
+let continuingApproval=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
 const key = () => session ? `${session.repositoryId}:${session.verifying && activeReview ? activeReview.revision : session.revision}` : 'disconnected';
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
 const files = () => session?.files || [];
-function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Export your review.'); } }
+function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Copy your review before leaving.'); } }
 function sidebarWidth(value) { return Math.max(180, Math.min(Number(value) || 266, 640, window.innerWidth - 320)); }
 function applySidebarWidth() {
  const width = state.sidebarCollapsed ? 0 : sidebarWidth(state.sidebarWidth);
@@ -107,6 +108,7 @@ function syncSubmitted(data) {
   $('#general-instruction').textContent = data.instruction;
   $('#general-replies').innerHTML = replies('review');
   completionButtons(); startReplies();
+  if(data.completion || data.outcome==='approved') continueAfterApproval(data);
 }
 function startReplies() {
   clearInterval(replyTimer);
@@ -129,7 +131,7 @@ function startReplies() {
 }
 function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 function fileCard(f) {
-  const tokens={old:diffTokens(f.lines,'old'),new:diffTokens(f.lines,'new')};
+  const tokens={old:diffTokens(f.lines,'old',f.path),new:diffTokens(f.lines,'new',f.path)};
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
   return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
@@ -163,10 +165,11 @@ document.addEventListener('change', e => { if (e.target.dataset.viewed) { const 
 $('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
+$('#reset-viewed').onclick=()=>{review().done=[];persist();render();toast('Viewed marks cleared');};
 $('#toggle-sidebar').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); render(); };
 function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
-function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; $('#download').disabled = !hasFeedback; }
+function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; }
 function openReview() {
   const p = packet();
   $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
@@ -178,16 +181,16 @@ function openReview() {
 $('#review').onclick = openReview;
 $('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
-$('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Download the JSON task instead.'); } };
-$('#download').onclick = () => { const url = URL.createObjectURL(new Blob([JSON.stringify({...packet(), prompt: prompt()}, null, 2)], {type: 'application/json'})); const a = document.createElement('a'); a.href = url; a.download = 'trace-review.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+$('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
 async function send(outcome) {
   $('#send').disabled = true; $('#approve').disabled = true; $('#cancel-review').disabled = true; $('#job-state').textContent = 'Submitting review…';
   try {
     const response = await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify(packet(outcome))});
     const job = await response.json(); if (!response.ok) throw new Error(job.error);
     syncSubmitted({...job.review, replies: []}); render();
-    if (job.status === 'submitted') { $('#job-state').textContent = outcome === 'cancelled' ? 'Review cancelled.' : outcome === 'approved' ? 'Review approved. You can close this dialog.' : session.handoff === 'waiting-agent' ? 'Review delivered. Close this dialog to follow agent replies in your comment threads.' : 'Review saved. Your agent can read it with trace-review feedback --json and reply to each thread.'; dialogButtons(); return; }
-    $('#job-state').textContent = 'Codex is working…';
+    showReviewSent(outcome);
+    if (job.status === 'submitted') { /* submission confirmation stays visible */ const deliveryMessage = outcome === 'cancelled' ? 'Review cancelled.' : outcome === 'approved' ? 'Review approved. You can close this dialog.' : session.handoff === 'waiting-agent' ? 'Review delivered. Close this dialog to follow agent replies in your comment threads.' : 'Review saved. Your agent can read it with trace-review feedback --json and reply to each thread.'; dialogButtons(); return; }
+    toast('✓ Review sent — Codex is working…');
     jobTimer = setInterval(async () => { try {
       const res = await fetch('/api/jobs/' + job.id); if (!res.ok) throw new Error('Could not retrieve job status'); const j = await res.json();
       $('#job-state').textContent = j.status === 'running' ? 'Codex is working…' : (j.status === 'succeeded' ? 'Done. Start a new review to inspect the changes.\n\n' : 'The agent task failed.\n') + j.output;
@@ -217,6 +220,8 @@ function selectGraphNode(path) {
   selectedNode = openedNode = path;
   editor = null; editId = null;
   renderGraph();
+  const viewport=$('#feed .graph-viewport'), node=[...$('#feed').querySelectorAll('[data-node]')].find(el=>el.dataset.node===path);
+  if(node && viewport){const a=node.getBoundingClientRect(),b=viewport.getBoundingClientRect();viewport.scrollTo({left:viewport.scrollLeft+a.left+a.width/2-b.left-viewport.clientWidth/2,top:viewport.scrollTop+a.top+a.height/2-b.top-viewport.clientHeight/2,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
   if($('#feed .graph-detail')) $('#feed .graph-detail').scrollTop = 0;
 }
 function resetGraph() {
@@ -226,8 +231,8 @@ function resetGraph() {
   state.sidebarCollapsed = true;
   applySidebarWidth(); tree();
   renderGraph();
-  $('#feed .graph-viewport').scrollLeft = 0;
-  $('#feed .graph-viewport').scrollTop = 0;
+  $('#feed .graph-viewport').scrollLeft = $('#feed .graph-viewport').clientWidth/2;
+  $('#feed .graph-viewport').scrollTop = $('#feed .graph-viewport').clientHeight/2;
   $('#feed').scrollIntoView({block:'start'});
 }
 function renderGraph() {
@@ -262,15 +267,17 @@ function renderGraph() {
   const related=graph.edges.filter(e=>e.source===selectedNode || e.target===selectedNode);
   const connections=selectedNode && related.length ? `<details class="graph-connections" open><summary>Connections (${related.length})</summary>${related.map(e=>`<button class="graph-connection" data-select-related="${esc(e.source===selectedNode?e.target:e.source)}"><span>${esc(e.source===selectedNode?'→':'←')} ${esc(e.source===selectedNode?e.target:e.source)}</span><small>${esc(e.kind)} ${esc(e.change||'')}</small></button>`).join('')}</details>` : '';
   const nodes=visible.map(n=>{const p=positions.get(n.path); const commentCount=fileCommentCount(review().comments,n.path); const status=({'A':'+','?':'+','M':'~','D':'−','R':'→'})[n.status] || '';return `<g role="button" tabindex="0" aria-label="Select ${esc(n.path)}" data-node="${esc(n.path)}" class="graph-node ${esc(n.test)} ${n.changed?'':'context'} ${selectedNode===n.path?'selected':''}" transform="translate(${p.x-115},${p.y-24})"><title>${esc(n.oldPath ? n.oldPath+' → '+n.path : n.path)}</title><rect width="230" height="48" rx="9"/><text x="12" y="20">${esc(n.icon)} ${esc(n.path.split('/').at(-1).slice(0,23))}</text><text class="graph-path" x="12" y="37">${esc(n.path.length>32?'…'+n.path.slice(-31):n.path)}</text><text x="211" y="20">${status}</text>${commentCount?`<g class="graph-comment-badge" aria-label="${commentCount} comments"><title>${commentCount} comments</title><rect x="210" y="29" width="${commentCount>99?34:26}" height="22" rx="11"/><text x="${commentCount>99?227:223}" y="44" text-anchor="middle">${commentCount>99?'99+':commentCount}</text></g>`:''}</g>`;}).join('');
-  $('#feed').innerHTML=`<div class="graph-layout"><section class="graph-canvas"><div class="graph-legend"><span class="code">● Code</span><span class="unit">● Unit</span><span class="integration">● Integration</span><span class="e2e">● E2E</span><span>● Unclassified test</span><span>━ Imports</span><span>┄ Calls</span><span>··· Uses type</span></div><p class="footnote">Select a node to reveal connected context. Tree branches group dependencies. All connections, including cycles and shared dependencies, appear below the selected file.</p><div class="graph-selection"><span>${esc(selectedNode || 'Select a file')}</span><div class="graph-controls" role="group" aria-label="Graph controls"><button id="graph-zoom-out" aria-label="Zoom out">−</button><output id="graph-zoom-value" aria-live="polite">${Math.round(graphScale*100)}%</output><button id="graph-zoom-in" aria-label="Zoom in">+</button><button id="reset-graph" title="Return to the initial review graph">Reset graph</button></div></div><div class="graph-viewport" tabindex="0" aria-label="Graph canvas"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" style="width:${width*graphScale}px;height:${height*graphScale}px;min-width:0" aria-label="File dependency graph">${lines}${nodes}</svg></div>${connections}${!visible.length?'<p>No changed files to display.</p>':''}</section>${openedNode?'<div id="graph-detail-resizer" role="separator" tabindex="0" aria-label="Resize file preview" aria-orientation="vertical" aria-controls="graph-file-content" title="Drag to resize file preview"></div><section class="graph-detail"><button id="close-graph-file" aria-label="Close file">× Close file</button><div id="graph-file-content"></div></section>':''}</div>`;
+  $('#feed').innerHTML=`<div class="graph-layout"><section class="graph-canvas"><div class="graph-legend"><span class="code">● Code</span><span class="unit">● Unit</span><span class="integration">● Integration</span><span class="e2e">● E2E</span><span>● Unclassified test</span><span>━ Imports</span><span>┄ Calls</span><span>··· Uses type</span></div><p class="footnote">Select a node to reveal connected context. Tree branches group dependencies. All connections, including cycles and shared dependencies, appear below the selected file.</p><div class="graph-selection"><span>${esc(selectedNode || 'Select a file')}</span><div class="graph-controls" role="group" aria-label="Graph controls"><button id="graph-zoom-out" aria-label="Zoom out">−</button><output id="graph-zoom-value" aria-live="polite">${Math.round(graphScale*100)}%</output><button id="graph-zoom-in" aria-label="Zoom in">+</button><button id="reset-graph" title="Return to the initial review graph">Reset graph</button></div></div><div class="graph-viewport" tabindex="0" aria-label="Graph canvas"><div class="graph-stage"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" style="width:${width*graphScale}px;height:${height*graphScale}px;min-width:0" aria-label="File dependency graph">${lines}${nodes}</svg></div></div>${connections}${!visible.length?'<p>No changed files to display.</p>':''}</section>${openedNode?'<div id="graph-detail-resizer" role="separator" tabindex="0" aria-label="Resize file preview" aria-orientation="vertical" aria-controls="graph-file-content" title="Drag to resize file preview"></div><section class="graph-detail"><div class="graph-detail-toolbar"><span id="graph-preview-label" class="graph-preview-label" hidden>Preview · Not part of this diff</span><button id="close-graph-file" aria-label="Close file" title="Close file">×</button></div><div id="graph-file-content"></div></section>':''}</div>`;
   const viewport=$('#feed .graph-viewport'), graphSvg=$('#feed .graph-svg');
-  viewport.scrollLeft=scrollLeft; viewport.scrollTop=scrollTop;
+  const stage=$('#feed .graph-stage'),padX=viewport.clientWidth/2,padY=viewport.clientHeight/2;
+  stage.style.padding=padY+'px '+padX+'px';
+  viewport.scrollLeft=scrollLeft || padX; viewport.scrollTop=scrollTop || padY;
   function zoomTo(value,clientX,clientY) {
     const bounds=viewport.getBoundingClientRect();
     const x=clientX===undefined?viewport.clientWidth/2:clientX-bounds.left;
     const y=clientY===undefined?viewport.clientHeight/2:clientY-bounds.top;
     const next=graphZoom(value), ratio=next/graphScale;
-    const left=(viewport.scrollLeft+x)*ratio-x, top=(viewport.scrollTop+y)*ratio-y;
+    const left=(viewport.scrollLeft-padX+x)*ratio-x+padX, top=(viewport.scrollTop-padY+y)*ratio-y+padY;
     graphScale=next;
     graphSvg.style.width=width*graphScale+'px';graphSvg.style.height=height*graphScale+'px';
     viewport.scrollLeft=left;viewport.scrollTop=top;
@@ -365,7 +372,7 @@ function renderGraph() {
     detailResizer.ondblclick=()=>{state.graphDetailWidth=setDetailWidth(container.clientWidth*.48);persist();};
   }
   if($('#close-graph-file')) $('#close-graph-file').onclick=()=>{openedNode=null;renderGraph();};
-  if(openedNode){const f=files().find(f=>f.path===openedNode);$('#graph-file-content').innerHTML=f && f.status !== 'D'?fileCard(f):`<div class="file-header">${esc(openedNode)}${f?.status === 'D' ? ' · Previous version' : ''}</div><pre class="graph-source"><code>${esc(graph.sources[openedNode] ?? 'Source preview unavailable (binary, oversized or unreadable file).')}</code></pre>`;}
+  if(openedNode){const f=files().find(f=>f.path===openedNode);$('#graph-preview-label').hidden=!!f;$('#graph-file-content').innerHTML=f && f.status !== 'D'?fileCard(f):`<div class="file-header">${esc(openedNode)}${f?.status === 'D' ? ' · Previous version' : ''}</div><pre class="graph-source"><code>${esc(graph.sources[openedNode] ?? 'Source preview unavailable (binary, oversized or unreadable file).')}</code></pre>`;}
   if($('#feed .graph-detail')) $('#feed .graph-detail').scrollTop = detailScroll;
   $('#summary').textContent=`${visible.filter(n=>n.changed).length} changed files · ${visible.filter(n=>!n.changed).length} context files`;
 }
@@ -403,6 +410,7 @@ async function approveReview() {
     const response = await fetch(`/api/reviews/${activeReview.id}/approve`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify({revision: session.revision})});
     const data = await response.json(); if (!response.ok) throw new Error(data.error);
     activeReview = data.review; clearInterval(replyTimer);
+    await continueAfterApproval(data.review);
     $('#review-status-text').textContent = 'Review approved · this is the version you approved. Original comment threads remain saved.';
     $('#reply-connection').textContent = 'Approval saved locally. It does not merge or commit changes.';
     render(); toast('Review approved');
@@ -440,3 +448,34 @@ document.addEventListener('keydown',e=>{if(e.altKey&&e.key==='F7'){if(e.target.m
 
 function closeDiffUsages(){usagesDialog.hidden=true;document.body.classList.remove('usages-open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!usagesDialog.hidden){closeDiffUsages();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('.diff-symbol')){e.preventDefault();openDiffUsages(e.target);}});
+
+function showReviewSent(outcome){
+ const dialog=$('#handoff');
+ const message=outcome==='approved'?'Review approved':outcome==='cancelled'?'Review cancelled':'Review sent';
+ $('#job-state').textContent='✓ '+message;
+ dialog.classList.add('review-sent');
+ setTimeout(()=>{if(!dialog.open){dialog.classList.remove('review-sent');return;}dialog.classList.add('review-closing');setTimeout(()=>{dialog.close();dialog.classList.remove('review-closing','review-sent');toast('✓ '+message);},180);},650);
+}
+
+
+async function continueAfterApproval(approval){
+ if(continuingApproval)return;
+ continuingApproval=true;
+ try{
+   const response=await fetch(`/api/reviews/${approval.id}/continue`,{method:'POST',headers:{'X-Trace-Token':session.token,Origin:location.origin}});
+   const data=await response.json();if(!response.ok)throw new Error(data.error);
+   const done=[...review().done];
+   session=data;submitted=false;activeReview=null;clearInterval(replyTimer);
+   state.reviews[key()]={comments:[],drafts:{},instruction:'',done};persist();
+   $('#instruction').disabled=false;$('#refresh').hidden=false;
+   $('#review-status').hidden=false;
+   $('#review-status-text').textContent='✓ Approval saved. You can add more feedback and send another review.';
+   $('#reply-connection').textContent='Previous review and agent replies remain saved in review history.';
+   $('#general-thread').hidden=true;
+   render();
+ }catch(error){toast('Approval saved. Could not continue: '+error.message);}
+ finally{continuingApproval=false;}
+}
+
+const toolbarObserver=new ResizeObserver(entries=>{for(const entry of entries)document.documentElement.style.setProperty('--review-toolbar-height',entry.target.getBoundingClientRect().height+'px');});
+toolbarObserver.observe(document.querySelector('main>.toolbar'));
