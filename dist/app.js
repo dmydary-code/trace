@@ -1,3 +1,4 @@
+import {diffTokens, findDiffUsages, usageLineHtml} from './usages.mjs';
 import {stableGraphLayout, revealGraphPath, fileCommentCount, routeGraphEdges, graphZoom} from './graph-layout.mjs';
 import {reviewPrompt, compactFileTree} from './core.mjs';
 const $ = s => document.querySelector(s);
@@ -128,8 +129,9 @@ function startReplies() {
 }
 function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 function fileCard(f) {
+  const tokens={old:diffTokens(f.lines,'old'),new:diffTokens(f.lines,'new')};
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${esc(l.text)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
   if(state.mode === 'graph') { renderGraph(); return; }
@@ -412,3 +414,29 @@ $('#back-to-threads').onclick = loadSession;
 $('#approve-top').onclick = approveReview;
 $('#approve-end').onclick = approveReview;
 $('#approve-final').onclick = approveReview;
+
+const usagesDialog=document.createElement('section');
+usagesDialog.hidden=true;usagesDialog.setAttribute('aria-label','Find Usages in diff');
+usagesDialog.id='diff-usages';document.body.append(usagesDialog);
+let usageTarget=null;
+document.addEventListener('focusin',e=>{if(e.target.matches('.diff-symbol'))usageTarget=e.target;});
+document.addEventListener('pointerdown',e=>{const target=e.target.closest('.diff-symbol');if(target)usageTarget=target;});
+function openDiffUsages(target){
+ const row=target?.closest('[data-usage-file]');if(!row)return;
+ const name=target.dataset.symbol,side=row.dataset.usageSide;
+ const results=findDiffUsages(files(),name,side);
+ usagesDialog.innerHTML=`<div class="dialog-head"><h2>Find Usages: ${esc(name)}</h2><button data-close-usages aria-label="Close usages">×</button></div><p class="footnote">${results.length} matches in the ${side==='old'?'previous':'current'} side of this diff. Matches use identifier spelling, not resolved symbol identity.</p><div class="usage-results">${results.map((r,i)=>`<button data-usage-result="${i}"><strong>${esc(r.path)}:${r.line??''}</strong><code>${esc(r.text.trim())}</code></button>`).join('')||'<p>No matches in this diff.</p>'}</div>`;
+ usagesDialog.querySelector('[data-close-usages]').onclick=()=>closeDiffUsages();
+ usagesDialog.querySelectorAll('[data-usage-result]').forEach(button=>button.onclick=()=>{
+  const result=results[+button.dataset.usageResult];query='';$('#search').value='';
+  if(state.mode==='graph'){selectGraphNode(result.path);}else{renderFeed();jump(result.id);}
+  const line=document.getElementById(`${result.id}-line-${result.index}`);
+  if(line){line.scrollIntoView({block:'center',behavior:'smooth'});line.classList.add('usage-highlight');const symbol=[...line.querySelectorAll('.diff-symbol')].find(t=>+t.dataset.offset===result.start);symbol?.focus({preventScroll:true});setTimeout(()=>line.classList.remove('usage-highlight'),2500);}
+ });
+ usagesDialog.hidden=false; document.body.classList.add('usages-open');
+}
+document.addEventListener('click',e=>{const target=e.target.closest('.diff-symbol');if(target && !window.getSelection()?.toString()){e.preventDefault();openDiffUsages(target);}});
+document.addEventListener('keydown',e=>{if(e.altKey&&e.key==='F7'){if(e.target.matches('input,textarea,[contenteditable="true"]'))return;e.preventDefault();if(usageTarget?.isConnected)openDiffUsages(usageTarget);else toast('Click an identifier in the diff, then press Option + F7');}});
+
+function closeDiffUsages(){usagesDialog.hidden=true;document.body.classList.remove('usages-open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!usagesDialog.hidden){closeDiffUsages();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('.diff-symbol')){e.preventDefault();openDiffUsages(e.target);}});

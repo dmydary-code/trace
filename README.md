@@ -15,6 +15,10 @@ Local code review for **Codex and Claude Code**. Explore a dependency graph, com
 
 Graph analysis currently covers relative JavaScript/TypeScript dependencies. Test categories use explicit project directory conventions or configuration; generic test filenames stay unclassified. [Graph behavior and analysis limits](docs/graph.md).
 
+## Find Usages in the diff
+
+Click an identifier to open its matches in the right sidebar, or use **Cmd + click** or **Option + F7** after selecting an identifier. Choose a result to jump to its file and line. File locations and code use distinct colors. Searches stay within the old or new side of the current diff and match identifier spelling, so unrelated symbols with the same name can appear together.
+
 ## Getting started
 
 Requires Homebrew, Git, and Codex or Claude Code. [Installation notes](docs/cli.md#installation).

@@ -122,7 +122,7 @@ export async function createTraceServer(options = {}) {
         } catch (err) { running = false; throw err; }
       }
       if (req.method !== 'GET') return json(res, 405, {error: 'Method not supported'});
-      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/graph-layout.mjs': 'graph-layout.mjs', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
+      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/usages.mjs': 'usages.mjs', '/graph-layout.mjs': 'graph-layout.mjs', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
       const file = allowed[url.pathname]; if (!file) return json(res, 404, {error: 'Not found'});
       let content = await readFile(join(root, 'dist', file));
       if (file === 'index.html') content = content.toString().replace('<html lang="en">', '<html lang="en" data-trace-local="true">');
