@@ -1,7 +1,7 @@
 import test from 'node:test';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, writeFile, readFile, rm, symlink} from 'node:fs/promises';
+import {mkdtemp, mkdir, writeFile, readFile, rm, symlink, realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {execFile, spawn} from 'node:child_process';
@@ -254,4 +254,13 @@ test('approved review can continue with new feedback while approval stays saved'
  assert.equal(feedback.status,201);
  const saved=await(await fetch(app.url+`/api/reviews/${approved.id}`)).json();assert.equal(saved.outcome,'approved');
  const retry=await fetch(app.url+`/api/reviews/${approved.id}/continue`,{method:'POST',headers});assert.equal(retry.status,409);
+});
+
+test('preview acknowledgment requires origin and token; empty diff explains the checkout',async t=>{
+ const {repo}=await fixture(t);const app=await createTraceServer({repo});t.after(()=>app.close());
+ const session=await(await fetch(app.url+'/api/session')).json();
+ assert.equal(session.repositoryPath,await realpath(repo));assert.equal(typeof session.emptyReason,'string');
+ let ready=false;app.events.once('client-ready',()=>ready=true);
+ const denied=await fetch(app.url+'/api/client-ready',{method:'POST'});assert.equal(denied.status,403);assert.equal(ready,false);
+ const accepted=await fetch(app.url+'/api/client-ready',{method:'POST',headers:{Origin:app.url,'X-Trace-Token':session.token}});assert.equal(accepted.status,200);assert.equal(ready,true);
 });

@@ -55,6 +55,10 @@ export async function createTraceServer(options = {}) {
       const navigation = req.method === 'GET' && ['/', '/index.html'].includes(url.pathname) && req.headers['sec-fetch-mode'] === 'navigate';
       if (req.headers['sec-fetch-site'] === 'cross-site' && !navigation) return json(res, 403, {error: 'Cross-site requests are not allowed'});
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, await snapshot());
+      if(req.method==='POST' && url.pathname==='/api/client-ready'){
+        if(req.headers['x-trace-token']!==token || req.headers.origin!==origin)return json(res,403,{error:'Open the review on the local server'});
+        events.emit('client-ready');return json(res,200,{ok:true});
+      }
       const currentMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/current$/);
       if (req.method === 'GET' && currentMatch) {
         if (currentMatch[1] !== submittedId) return json(res, 404, {error: 'Review not open in this viewer'});

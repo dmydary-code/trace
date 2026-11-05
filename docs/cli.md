@@ -83,3 +83,17 @@ Run this in the reviewed repository, or add `--repo PATH`. Use `--agent claude` 
 Statuses: `addressed`, `needs_input`, `not_changed`, `note`. These are agent-reported outcomes, not proof that checks passed. The reviewer controls Resolve in the UI. Replies are stored as immutable files, so simultaneous replies cannot overwrite one another. The viewer polls for replies every 1.5 seconds without replacing the diff or moving the reading position.
 
 Submitted threads are read-only apart from the browser-local Resolve marker. Start a new review for further feedback on edited code. Automatic re-anchoring and two-way follow-up messages within a submitted thread are not implemented.
+
+## Claude Desktop preview fallback
+
+The review skill launches `trace-review review --wait --json --no-open --browser-fallback --repo /absolute/project/path`. Open the exact URL from the ready event in the Desktop Browser pane. If the page cannot confirm that it loaded and rendered the diff within eight seconds, Trace opens that same URL in the default external browser. This preserves one viewer and the original feedback session. A later failure can be handled by opening that exact URL externally; do not start another server.
+
+The review shows the absolute repository path, comparison base and mode, and whether it is a linked worktree. An empty diff explains staged-only filtering or a clean/current comparison; check that the agent and Trace use the same checkout. A committed change needs a suitable `--base` instead of the default HEAD comparison.
+
+## Verified plugin installation
+
+`trace-review install all` attempts Codex and Claude independently, prints a result for each, and exits nonzero if either fails. It verifies the installed plugin version, enabled state, source registration and manifest. Homebrew installs register `/opt/homebrew/opt/trace-review/libexec` (or the corresponding Homebrew prefix), rather than a versioned Cellar directory. Known old Trace Homebrew sources can be repaired automatically; unrelated marketplace sources are reported instead of replaced. Restart the app or start a new session after a successful install.
+
+## Release version checks
+
+Use `npm version <version>` to update the CLI and both plugin manifests together through the version lifecycle hook. `npm run sync-versions` synchronizes manifests after an intentional manual package version edit. `npm test` rejects mismatched CLI/plugin versions before release. Publish the code tag, then update the Homebrew formula to that tag and commit as usual.

@@ -8,6 +8,7 @@ const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let continuingApproval=false;
+let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
 const key = () => session ? `${session.repositoryId}:${session.verifying && activeReview ? activeReview.revision : session.revision}` : 'disconnected';
@@ -91,7 +92,7 @@ function thread(c) {
   const name = session?.author?.name || 'Git author not configured';
   const words = session?.author?.name?.trim().split(/\s+/u) || [];
   const initials = words.length ? [words[0], ...(words.length > 1 ? [words.at(-1)] : [])].map(word => Array.from(word)[0]).join('').toLocaleUpperCase() : '?';
-  return `<div class="thread ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><p>${esc(c.body)}</p><div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
+  return `<div class="thread ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><p>${esc(c.body)}</p><div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
 }
 function syncSubmitted(data) {
   activeReview = data; submitted = true; editor = null; editId = null;
@@ -122,6 +123,7 @@ function startReplies() {
       if (JSON.stringify(data.replies) !== JSON.stringify(activeReview.replies)) {
         activeReview = data;
         for (const node of document.querySelectorAll('[data-replies]')) node.innerHTML = replies(node.dataset.replies);
+        updatePendingComments();
       }
       $('#reply-connection').textContent = 'Agent replies update automatically. Statuses are reported by the agent; resolve threads after checking the fix.';
     } catch {
@@ -133,12 +135,13 @@ function composer(f, index) { const l = f.lines[index]; return `<form class="com
 function fileCard(f) {
   const tokens={old:diffTokens(f.lines,'old',f.path),new:diffTokens(f.lines,'new',f.path)};
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card ${state.mode==='files' && r.done.includes(f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
   if(state.mode === 'graph') { renderGraph(); return; }
   const list = files().filter(f => f.path.toLowerCase().includes(query)).sort((a,b) => a.path.localeCompare(b.path));
-  $('#feed').innerHTML = list.map(fileCard).join('') || '<div class="empty">No changes to display</div>';
+  $('#feed').innerHTML = list.map(fileCard).join('') || `<div class="empty">${esc(query?'No files match this search.':session?.emptyReason||'No changes to display')}<p>${esc(session?.repositoryPath||'')}</p></div>`;
+  applyUsageHighlights();
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
@@ -161,7 +164,7 @@ document.addEventListener('submit', e => {
   else review().comments.push({id: crypto.randomUUID(), path: f.path, index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body, resolved: false});
   delete review().drafts[editor]; editor = null; editId = null; persist(); renderFeed(); counts(); toast('Comment added to review');
 });
-document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) review().done.push(path); persist(); tree(); counts(); if(state.mode === 'graph') renderGraph(); } });
+document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) review().done.push(path); persist(); tree(); counts(); renderFeed(); } });
 $('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
@@ -169,7 +172,7 @@ $('#reset-viewed').onclick=()=>{review().done=[];persist();render();toast('Viewe
 $('#toggle-sidebar').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); render(); };
 function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
-function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || submitted; $('#copy-prompt').disabled = !hasFeedback; }
+function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
 function openReview() {
   const p = packet();
   $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
@@ -183,6 +186,9 @@ $('#instruction').oninput = e => { review().instruction = e.target.value; persis
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
 async function send(outcome) {
+  if(sendingReview)return;
+  sendingReview=true;sendingCommentIds=new Set(packet(outcome).comments.map(c=>c.id));
+  $('#handoff').close();toast('Sending review…');renderFeed();
   $('#send').disabled = true; $('#approve').disabled = true; $('#cancel-review').disabled = true; $('#job-state').textContent = 'Submitting review…';
   try {
     const response = await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify(packet(outcome))});
@@ -196,20 +202,24 @@ async function send(outcome) {
       $('#job-state').textContent = j.status === 'running' ? 'Codex is working…' : (j.status === 'succeeded' ? 'Done. Start a new review to inspect the changes.\n\n' : 'The agent task failed.\n') + j.output;
       if (j.status !== 'running') { clearInterval(jobTimer); jobTimer = null; }
     } catch (err) { clearInterval(jobTimer); jobTimer = null; $('#job-state').textContent = err.message; } }, 1500);
-  } catch (err) { $('#job-state').textContent = err.message; dialogButtons(); }
+  } catch (err) { $('#job-state').textContent = err.message;toast('Review was not sent: '+err.message);openReview(); }
+  finally {sendingReview=false;sendingCommentIds.clear();updatePendingComments();dialogButtons();}
 }
 $('#send').onclick = () => send('changes_requested'); $('#approve').onclick = () => send('approved'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession() {
   try {
     const res = await fetch('/api/session'); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
     const next = await res.json(); if (next.sessionId !== session?.sessionId) submitted = false; session = next;
-    $('#repo').textContent = session.repo; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
+    $('#repo').textContent = session.repo;$('#repo').title=session.repositoryPath||session.repo;
+    let locationInfo=$('#repository-location');if(!locationInfo){locationInfo=document.createElement('p');locationInfo.id='repository-location';locationInfo.className='footnote';$('.intro').append(locationInfo);}
+    locationInfo.textContent=`${session.repositoryPath||session.repo} · ${session.comparison} against ${session.base}${session.isWorktree?' · Git worktree':''}`; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
     $('#detected').textContent = 'Local dependency graph';
     clearInterval(replyTimer); activeReview = null; submitted = false; $('#instruction').disabled = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
     $('#refresh').hidden = false; editor = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
     render();
-  } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL.</div>`; toast(err.message); }
+    fetch('/api/client-ready',{method:'POST',headers:{'X-Trace-Token':session.token}}).catch(()=>{});
+  } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();
 let selectedNode = null, openedNode = null, revealedNodes = new Set(), expandedNodes = new Set(), graphRevision = null, draggedPositions = new Map(), suppressNodeClickUntil = 0, graphScale = 1;
@@ -267,7 +277,7 @@ function renderGraph() {
   const related=graph.edges.filter(e=>e.source===selectedNode || e.target===selectedNode);
   const connections=selectedNode && related.length ? `<details class="graph-connections" open><summary>Connections (${related.length})</summary>${related.map(e=>`<button class="graph-connection" data-select-related="${esc(e.source===selectedNode?e.target:e.source)}"><span>${esc(e.source===selectedNode?'→':'←')} ${esc(e.source===selectedNode?e.target:e.source)}</span><small>${esc(e.kind)} ${esc(e.change||'')}</small></button>`).join('')}</details>` : '';
   const nodes=visible.map(n=>{const p=positions.get(n.path); const commentCount=fileCommentCount(review().comments,n.path); const status=({'A':'+','?':'+','M':'~','D':'−','R':'→'})[n.status] || '';return `<g role="button" tabindex="0" aria-label="Select ${esc(n.path)}" data-node="${esc(n.path)}" class="graph-node ${esc(n.test)} ${n.changed?'':'context'} ${selectedNode===n.path?'selected':''}" transform="translate(${p.x-115},${p.y-24})"><title>${esc(n.oldPath ? n.oldPath+' → '+n.path : n.path)}</title><rect width="230" height="48" rx="9"/><text x="12" y="20">${esc(n.icon)} ${esc(n.path.split('/').at(-1).slice(0,23))}</text><text class="graph-path" x="12" y="37">${esc(n.path.length>32?'…'+n.path.slice(-31):n.path)}</text><text x="211" y="20">${status}</text>${commentCount?`<g class="graph-comment-badge" aria-label="${commentCount} comments"><title>${commentCount} comments</title><rect x="210" y="29" width="${commentCount>99?34:26}" height="22" rx="11"/><text x="${commentCount>99?227:223}" y="44" text-anchor="middle">${commentCount>99?'99+':commentCount}</text></g>`:''}</g>`;}).join('');
-  $('#feed').innerHTML=`<div class="graph-layout"><section class="graph-canvas"><div class="graph-legend"><span class="code">● Code</span><span class="unit">● Unit</span><span class="integration">● Integration</span><span class="e2e">● E2E</span><span>● Unclassified test</span><span>━ Imports</span><span>┄ Calls</span><span>··· Uses type</span></div><p class="footnote">Select a node to reveal connected context. Tree branches group dependencies. All connections, including cycles and shared dependencies, appear below the selected file.</p><div class="graph-selection"><span>${esc(selectedNode || 'Select a file')}</span><div class="graph-controls" role="group" aria-label="Graph controls"><button id="graph-zoom-out" aria-label="Zoom out">−</button><output id="graph-zoom-value" aria-live="polite">${Math.round(graphScale*100)}%</output><button id="graph-zoom-in" aria-label="Zoom in">+</button><button id="reset-graph" title="Return to the initial review graph">Reset graph</button></div></div><div class="graph-viewport" tabindex="0" aria-label="Graph canvas"><div class="graph-stage"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" style="width:${width*graphScale}px;height:${height*graphScale}px;min-width:0" aria-label="File dependency graph">${lines}${nodes}</svg></div></div>${connections}${!visible.length?'<p>No changed files to display.</p>':''}</section>${openedNode?'<div id="graph-detail-resizer" role="separator" tabindex="0" aria-label="Resize file preview" aria-orientation="vertical" aria-controls="graph-file-content" title="Drag to resize file preview"></div><section class="graph-detail"><div class="graph-detail-toolbar"><span id="graph-preview-label" class="graph-preview-label" hidden>Preview · Not part of this diff</span><button id="close-graph-file" aria-label="Close file" title="Close file">×</button></div><div id="graph-file-content"></div></section>':''}</div>`;
+  $('#feed').innerHTML=`<div class="graph-layout"><section class="graph-canvas"><div class="graph-legend"><span class="code">● Code</span><span class="unit">● Unit</span><span class="integration">● Integration</span><span class="e2e">● E2E</span><span>● Unclassified test</span><span>━ Imports</span><span>┄ Calls</span><span>··· Uses type</span></div><p class="footnote">Select a node to reveal connected context. Tree branches group dependencies. All connections, including cycles and shared dependencies, appear below the selected file.</p><div class="graph-selection"><span>${esc(selectedNode || 'Select a file')}</span><div class="graph-controls" role="group" aria-label="Graph controls"><button id="graph-zoom-out" aria-label="Zoom out">−</button><output id="graph-zoom-value" aria-live="polite">${Math.round(graphScale*100)}%</output><button id="graph-zoom-in" aria-label="Zoom in">+</button><button id="reset-graph" title="Return to the initial review graph">Reset graph</button></div></div><div class="graph-viewport" tabindex="0" aria-label="Graph canvas"><div class="graph-stage"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" style="width:${width*graphScale}px;height:${height*graphScale}px;min-width:0" aria-label="File dependency graph">${lines}${nodes}</svg></div></div>${connections}${!visible.length?`<p>${esc(query?'No files match this search.':session?.emptyReason||'No unreviewed changed files. Use Reset Viewed to restore reviewed files.')}</p>`:''}</section>${openedNode?'<div id="graph-detail-resizer" role="separator" tabindex="0" aria-label="Resize file preview" aria-orientation="vertical" aria-controls="graph-file-content" title="Drag to resize file preview"></div><section class="graph-detail"><div class="graph-detail-toolbar"><span id="graph-preview-label" class="graph-preview-label" hidden>Preview · Not part of this diff</span><button id="close-graph-file" aria-label="Close file" title="Close file">×</button></div><div id="graph-file-content"></div></section>':''}</div>`;
   const viewport=$('#feed .graph-viewport'), graphSvg=$('#feed .graph-svg');
   const stage=$('#feed .graph-stage'),padX=viewport.clientWidth/2,padY=viewport.clientHeight/2;
   stage.style.padding=padY+'px '+padX+'px';
@@ -374,6 +384,7 @@ function renderGraph() {
   if($('#close-graph-file')) $('#close-graph-file').onclick=()=>{openedNode=null;renderGraph();};
   if(openedNode){const f=files().find(f=>f.path===openedNode);$('#graph-preview-label').hidden=!!f;$('#graph-file-content').innerHTML=f && f.status !== 'D'?fileCard(f):`<div class="file-header">${esc(openedNode)}${f?.status === 'D' ? ' · Previous version' : ''}</div><pre class="graph-source"><code>${esc(graph.sources[openedNode] ?? 'Source preview unavailable (binary, oversized or unreadable file).')}</code></pre>`;}
   if($('#feed .graph-detail')) $('#feed .graph-detail').scrollTop = detailScroll;
+  applyUsageHighlights();
   $('#summary').textContent=`${visible.filter(n=>n.changed).length} changed files · ${visible.filter(n=>!n.changed).length} context files`;
 }
 
@@ -387,10 +398,15 @@ function completionButtons() {
   }
   $('#verify-latest').hidden = !canFinish;
   $('#verify-latest').textContent = session?.verifying ? 'Refresh latest changes' : 'Review latest changes';
+  $('#verify-latest').title = 'Checks the Git diff on disk. If files have not changed, the displayed diff stays the same.';
   $('#back-to-threads').hidden = !session?.verifying;
   $('#approve-final').hidden = !canFinish;
 }
 async function verifyLatest() {
+  const button=$('#verify-latest');
+  if(button.disabled)return;
+  const previousRevision=session?.revision, wasVerifying=!!session?.verifying;
+  button.disabled=true;button.textContent='Checking…';button.setAttribute('aria-busy','true');
   try {
     const response = await fetch(`/api/reviews/${activeReview.id}/current`);
     const data = await response.json(); if (!response.ok) throw new Error(data.error);
@@ -398,8 +414,11 @@ async function verifyLatest() {
     $('#review-status-text').textContent = 'Latest changes · inspect this diff before approving. Original comment threads are preserved in the previous view.';
     $('#general-thread').hidden = true;
     $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`;
-    render(); document.querySelector('main').scrollIntoView({block: 'start'});
+    render();
+    if(wasVerifying && data.revision===previousRevision){toast('No new changes — files on disk match the displayed diff.');}
+    else {toast(data.revision===previousRevision?'You are viewing the latest changes.':'Latest changes loaded.');document.querySelector('main').scrollIntoView({block:'start'});}
   } catch (error) { toast(error.message); }
+  finally {button.disabled=false;button.removeAttribute('aria-busy');completionButtons();}
 }
 async function approveReview() {
   if (!submitted) { openReview(); return; }
@@ -433,10 +452,11 @@ function openDiffUsages(target){
  const row=target?.closest('[data-usage-file]');if(!row)return;
  const name=target.dataset.symbol,side=row.dataset.usageSide;
  const results=findDiffUsages(files(),name,side);
+ usageSelection={name,side};applyUsageHighlights();
  usagesDialog.innerHTML=`<div class="dialog-head"><h2>Find Usages: ${esc(name)}</h2><button data-close-usages aria-label="Close usages">×</button></div><p class="footnote">${results.length} matches in the ${side==='old'?'previous':'current'} side of this diff. Matches use identifier spelling, not resolved symbol identity.</p><div class="usage-results">${results.map((r,i)=>`<button data-usage-result="${i}"><strong>${esc(r.path)}:${r.line??''}</strong><code>${esc(r.text.trim())}</code></button>`).join('')||'<p>No matches in this diff.</p>'}</div>`;
  usagesDialog.querySelector('[data-close-usages]').onclick=()=>closeDiffUsages();
  usagesDialog.querySelectorAll('[data-usage-result]').forEach(button=>button.onclick=()=>{
-  const result=results[+button.dataset.usageResult];query='';$('#search').value='';
+  const result=results[+button.dataset.usageResult];review().done=review().done.filter(p=>p!==result.path);persist();query='';$('#search').value='';
   if(state.mode==='graph'){selectGraphNode(result.path);}else{renderFeed();jump(result.id);}
   const line=document.getElementById(`${result.id}-line-${result.index}`);
   if(line){line.scrollIntoView({block:'center',behavior:'smooth'});line.classList.add('usage-highlight');const symbol=[...line.querySelectorAll('.diff-symbol')].find(t=>+t.dataset.offset===result.start);symbol?.focus({preventScroll:true});setTimeout(()=>line.classList.remove('usage-highlight'),2500);}
@@ -446,12 +466,13 @@ function openDiffUsages(target){
 document.addEventListener('click',e=>{const target=e.target.closest('.diff-symbol');if(target && !window.getSelection()?.toString()){e.preventDefault();openDiffUsages(target);}});
 document.addEventListener('keydown',e=>{if(e.altKey&&e.key==='F7'){if(e.target.matches('input,textarea,[contenteditable="true"]'))return;e.preventDefault();if(usageTarget?.isConnected)openDiffUsages(usageTarget);else toast('Click an identifier in the diff, then press Option + F7');}});
 
-function closeDiffUsages(){usagesDialog.hidden=true;document.body.classList.remove('usages-open');}
+function closeDiffUsages(){usageSelection=null;applyUsageHighlights();usagesDialog.hidden=true;document.body.classList.remove('usages-open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!usagesDialog.hidden){closeDiffUsages();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('.diff-symbol')){e.preventDefault();openDiffUsages(e.target);}});
 
 function showReviewSent(outcome){
  const dialog=$('#handoff');
  const message=outcome==='approved'?'Review approved':outcome==='cancelled'?'Review cancelled':'Review sent';
+ if(!dialog.open){toast('✓ '+message);return;}
  $('#job-state').textContent='✓ '+message;
  dialog.classList.add('review-sent');
  setTimeout(()=>{if(!dialog.open){dialog.classList.remove('review-sent');return;}dialog.classList.add('review-closing');setTimeout(()=>{dialog.close();dialog.classList.remove('review-closing','review-sent');toast('✓ '+message);},180);},650);
@@ -479,3 +500,18 @@ async function continueAfterApproval(approval){
 
 const toolbarObserver=new ResizeObserver(entries=>{for(const entry of entries)document.documentElement.style.setProperty('--review-toolbar-height',entry.target.getBoundingClientRect().height+'px');});
 toolbarObserver.observe(document.querySelector('main>.toolbar'));
+
+function commentPending(id){
+ return sendingCommentIds.has(id) || (activeReview?.outcome==='changes_requested' && !activeReview.completion && activeReview.comments.some(c=>c.id===id) && !(activeReview.replies||[]).some(r=>r.commentId===id));
+}
+function updatePendingComments(){for(const node of document.querySelectorAll('[data-pending]'))node.hidden=!commentPending(node.dataset.pending);}
+function applyUsageHighlights(){
+ for(const row of document.querySelectorAll('.usage-match'))row.classList.remove('usage-match');
+ for(const token of document.querySelectorAll('.usage-token-match'))token.classList.remove('usage-token-match');
+ if(!usageSelection)return;
+ for(const result of findDiffUsages(files(),usageSelection.name,usageSelection.side)){
+  const row=document.getElementById(`${result.id}-line-${result.index}`);if(!row)continue;
+  row.classList.add('usage-match');
+  for(const token of row.querySelectorAll('.diff-symbol'))if(+token.dataset.offset===result.start)token.classList.add('usage-token-match');
+ }
+}

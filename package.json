@@ -1,6 +1,6 @@
 {
   "name": "trace-review",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Local code review with dependency graphs and threaded feedback for Codex and Claude Code",
   "license": "MIT",
   "private": true,
@@ -14,6 +14,8 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "start": "node bin/trace.mjs"
+    "start": "node bin/trace.mjs",
+    "sync-versions": "node scripts/sync-plugin-versions.mjs",
+    "version": "node scripts/sync-plugin-versions.mjs && git add plugins/trace/.claude-plugin/plugin.json plugins/trace/.codex-plugin/plugin.json"
   }
 }
