@@ -6,9 +6,11 @@ Install and authenticate Codex or Claude Code separately. Run `trace-review inst
 
 If the repository is private, authenticate a GitHub account with repository access using `gh auth login`, then run `gh auth setup-git --hostname github.com` before installing the Homebrew tap.
 
-To update, run `brew update`, `brew upgrade dmydary-code/trace/trace-review`, and `trace-review install all`, then restart the agent.
+After adding the tap, run `brew trust --formula dmydary-code/trace/trace-review` before installation. This trusts only the Trace formula.
 
-The Homebrew package was renamed from `trace` to `trace-review`. Existing installations can run `brew update` and `brew migrate dmydary-code/trace/trace`, then `brew upgrade dmydary-code/trace/trace-review` and `trace-review install all`. Review data stays in each repository’s Git metadata.
+To update, run `brew update`, `brew trust --formula dmydary-code/trace/trace-review`, `brew upgrade dmydary-code/trace/trace-review`, and `trace-review install all`, then restart the agent.
+
+The Homebrew package was renamed from `trace` to `trace-review`. Existing installations can run `brew update` and `brew migrate dmydary-code/trace/trace`, then `brew trust --formula dmydary-code/trace/trace-review`, `brew upgrade dmydary-code/trace/trace-review` and `trace-review install all`. Review data stays in each repository’s Git metadata.
 
 ## Standalone CLI
 

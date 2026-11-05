@@ -21,6 +21,7 @@ Requires Homebrew, Git, and Codex or Claude Code.
 
 ```sh
 brew tap dmydary-code/trace https://github.com/dmydary-code/trace.git
+brew trust --formula dmydary-code/trace/trace-review
 brew install trace-review
 trace-review install all
 ```
@@ -33,7 +34,7 @@ trace-review --staged
 trace-review --base origin/main --merge-base
 ```
 
-To update: `brew update && brew upgrade trace-review`, then `trace-review install all` and restart your agent. [CLI and installation details](docs/cli.md).
+To update: `brew update`, `brew trust --formula dmydary-code/trace/trace-review`, and `brew upgrade trace-review`, then `trace-review install all` and restart your agent. [CLI and installation details](docs/cli.md).
 
 ## License
 
