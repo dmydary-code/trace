@@ -91,7 +91,9 @@ test('feedback persists exact validated anchors and rejects stale/duplicate subm
 });
 test('CLI wait completes with feedback in the calling process without running a model', async t => {
   const {repo} = await fixture(t); await writeFile(join(repo, 'file.ts'), 'new\n');
-  const child = spawn(process.execPath, [resolve('bin/trace.mjs'), 'review', '--repo', repo, '--wait', '--json', '--no-open'], {stdio: ['ignore', 'pipe', 'pipe']});
+  const sessionDir=join(repo,'sessions'),env={...process.env,TRACE_SESSION_DIRECTORY:sessionDir};
+  await exec(process.execPath,['--input-type=module','-e',`import {handleSession} from ${JSON.stringify(new URL('../plugins/trace/hooks/session.mjs',import.meta.url).href)};await handleSession({session_id:'test-review',hook_event_name:'SessionStart',source:'startup'});`],{env});
+  const child = spawn(process.execPath, [resolve('bin/trace.mjs'), 'review', '--repo', repo, '--wait', '--json', '--no-open','--session-id','test-review'], {env,stdio: ['ignore', 'pipe', 'pipe']});
   t.after(() => child.kill());
   let output = ''; const events = []; let readyResolve;
   const ready = new Promise(ok => readyResolve = ok);

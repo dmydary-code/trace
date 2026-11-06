@@ -1,6 +1,6 @@
 {
   "name": "trace-review",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Local code review with dependency graphs and threaded feedback for Codex and Claude Code",
   "license": "MIT",
   "private": true,

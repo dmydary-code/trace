@@ -27,7 +27,7 @@ brew install trace-review
 trace-review install all
 ```
 
-Restart your agent. In **Codex**, type **`$`** and select the **`review`** skill from the **Trace** plugin, then submit your request. You can also ask **“Use Trace to review my changes.”** In **Claude Code**, run **`/trace:review`**. Or launch directly inside your repository:
+Restart your agent and enable/trust the Trace session hooks (in Codex: `/hooks`). These close the local viewer when its agent session ends; without an active session hook, the viewer closes after feedback is submitted. In **Codex**, type **`$`** and select the **`review`** skill from the **Trace** plugin, then submit your request. You can also ask **“Use Trace to review my changes.”** In **Claude Code**, run **`/trace:review`**. Or launch directly inside your repository:
 
 ```sh
 trace-review

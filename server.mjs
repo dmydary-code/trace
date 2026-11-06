@@ -161,7 +161,7 @@ export async function createTraceServer(options = {}) {
   });
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(options.port ?? 0, '127.0.0.1', ok); });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return {url: origin, repository, events, server, sessionId, close: () => new Promise((ok, fail) => { server.close(err => err ? fail(err) : ok()); server.closeIdleConnections(); })};
+  return {url: origin, repository, events, server, sessionId, close: () => new Promise((ok, fail) => { server.close(err => err ? fail(err) : ok()); server.closeAllConnections(); })};
 }
 
 // Backwards-compatible entry point; the installed command lives in bin/trace.mjs.
