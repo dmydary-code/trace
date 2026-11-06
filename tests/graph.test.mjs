@@ -24,3 +24,23 @@ test('graph compares dependencies and retains unchanged context and deleted sour
  assert.match(graph.sources['a.ts'],/function a/);
  } finally {await rm(repo,{recursive:true,force:true});}
 });
+
+test('481 files use batched Git reads and reuse immutable blobs on rebuild',async()=>{
+ const repo=await mkdtemp(join(tmpdir(),'trace-graph-batch-'));const git=(...args)=>gitOutput(['-C',repo,...args]);
+ try{
+ await git('init');await git('config','user.name','Test');await git('config','user.email','test@example.com');
+ await Promise.all(Array.from({length:481},(_,i)=>writeFile(join(repo,`file-${i}.ts`),`export const unique_batch_${i} = ${i};\n`)));
+ await git('add','.');await git('commit','-m','batch fixture');
+ await writeFile(join(repo,'file-0.ts'),"import {unique_batch_1} from './file-1';\n");
+ const snapshot=await(await openRepository(repo)).snapshot();let calls=[];
+ const runner=async(args,options)=>{calls.push(args);return gitOutput(args,options);};
+ const graph=await buildGraph(repo,snapshot,{runner});
+ assert.equal(graph.nodes.length,481);assert(graph.edges.some(e=>e.target==='file-1.ts'));
+ assert.equal(calls.filter(args=>args.includes('show')).length,0);
+ assert(calls.length<30,`Expected batch reads; got ${calls.length} Git processes`);
+ calls=[];await buildGraph(repo,snapshot,{runner});
+ assert.equal(calls.filter(args=>args.includes('cat-file')).length,0);
+ await writeFile(join(repo,'file-1.ts'),'export const new_context = 7;\n');
+ const updated=await buildGraph(repo,snapshot,{runner});assert.match(updated.sources['file-1.ts'],/new_context/);
+ }finally{await rm(repo,{recursive:true,force:true});}
+});

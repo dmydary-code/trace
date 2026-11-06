@@ -8,6 +8,7 @@ const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let continuingApproval=false;
+let diffLoading=false, graphLoading=null, graphError=null;
 let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
@@ -138,6 +139,7 @@ function fileCard(f) {
   return `<article class="file-card ${state.mode==='files' && r.done.includes(f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
+  if(diffLoading || !session){$('#feed').innerHTML='<div class="empty" role="status" aria-busy="true">Loading diff…</div>';return;}
   if(state.mode === 'graph') { renderGraph(); return; }
   const list = files().filter(f => f.path.toLowerCase().includes(query)).sort((a,b) => a.path.localeCompare(b.path));
   $('#feed').innerHTML = list.map(fileCard).join('') || `<div class="empty">${esc(query?'No files match this search.':session?.emptyReason||'No changes to display')}<p>${esc(session?.repositoryPath||'')}</p></div>`;
@@ -207,6 +209,7 @@ async function send(outcome) {
 }
 $('#send').onclick = () => send('changes_requested'); $('#approve').onclick = () => send('approved'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession() {
+  diffLoading=true;graphError=null;renderFeed();
   try {
     const res = await fetch('/api/session'); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
     const next = await res.json(); if (next.sessionId !== session?.sessionId) submitted = false; session = next;
@@ -217,9 +220,9 @@ async function loadSession() {
     clearInterval(replyTimer); activeReview = null; submitted = false; $('#instruction').disabled = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
     $('#refresh').hidden = false; editor = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
-    render();
+    diffLoading=false;render();
     fetch('/api/client-ready',{method:'POST',headers:{'X-Trace-Token':session.token}}).catch(()=>{});
-  } catch (err) { $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
+  } catch (err) { diffLoading=false;$('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();
 let selectedNode = null, openedNode = null, revealedNodes = new Set(), expandedNodes = new Set(), graphRevision = null, draggedPositions = new Map(), suppressNodeClickUntil = 0, graphScale = 1;
@@ -245,7 +248,15 @@ function resetGraph() {
   $('#feed .graph-viewport').scrollTop = $('#feed .graph-viewport').clientHeight/2;
   $('#feed').scrollIntoView({block:'start'});
 }
+async function loadGraph(){
+ const target=session;if(!target||graphLoading===target)return;graphLoading=target;
+ try{const response=await fetch('/api/graph?revision='+encodeURIComponent(target.revision));const data=await response.json();if(!response.ok)throw new Error(data.error);if(session===target){target.graph=data.graph;graphError=null;}}
+ catch(error){if(session===target)graphError=error.message;}
+ finally{if(graphLoading===target)graphLoading=null;if(session===target&&state.mode==='graph')renderGraph();}
+}
 function renderGraph() {
+ if(!session?.graph){$('#feed').innerHTML=graphError?`<div class="empty">${esc(graphError)} <button id="retry-graph">Retry Graph</button></div>`:'<div class="empty" role="status" aria-busy="true">Building Graph… Your diff is available in Files.</div>';if(graphError)$('#retry-graph').onclick=()=>{graphError=null;loadGraph();renderGraph();};else loadGraph();return;}
+
   const scrollLeft = $('#feed .graph-viewport')?.scrollLeft || 0;
   const scrollTop = $('#feed .graph-viewport')?.scrollTop || 0;
   const detailScroll = $('#feed .graph-detail')?.scrollTop || 0;

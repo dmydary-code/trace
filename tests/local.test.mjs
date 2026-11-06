@@ -264,3 +264,17 @@ test('preview acknowledgment requires origin and token; empty diff explains the 
  const denied=await fetch(app.url+'/api/client-ready',{method:'POST'});assert.equal(denied.status,403);assert.equal(ready,false);
  const accepted=await fetch(app.url+'/api/client-ready',{method:'POST',headers:{Origin:app.url,'X-Trace-Token':session.token}});assert.equal(accepted.status,200);assert.equal(ready,true);
 });
+
+test('diff does not await Graph; concurrent graph requests share one build',async t=>{
+ const {repo}=await fixture(t);let builds=0,finish;
+ const app=await createTraceServer({repo,graphBuilder:()=>{builds++;return new Promise(resolve=>finish=resolve);}});t.after(()=>app.close());
+ const session=await(await fetch(app.url+'/api/session')).json();assert.equal(builds,0);assert.equal(session.graph,null);
+ const url=app.url+'/api/graph?revision='+session.revision;
+ const first=fetch(url),second=fetch(url);
+ while(!finish)await new Promise(resolve=>setTimeout(resolve,10));
+ const next=await(await fetch(app.url+'/api/session')).json();assert.equal(next.revision,session.revision);assert.equal(builds,1);
+ finish({nodes:[],edges:[],sources:{}});
+ assert.equal((await first).status,200);assert.equal((await second).status,200);
+ assert.equal((await fetch(url)).status,200);assert.equal(builds,1);
+ assert.equal((await fetch(app.url+'/api/graph?revision=stale')).status,409);
+});

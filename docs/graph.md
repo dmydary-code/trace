@@ -27,3 +27,7 @@ Viewed files are hidden from Graph together with their edges. Uncheck Viewed in 
 Use + and − to zoom between 25% and 300%. Pinch on a trackpad zooms around the pointer; normal two-finger scrolling pans the canvas. Reset graph restores 100% zoom. Node dragging uses graph coordinates at the current scale.
 
 Drag the divider beside the file preview to adjust its width. The graph canvas is clipped without changing zoom or node coordinates. Preview width is remembered locally; arrow keys also resize the divider, and double-click restores the default split.
+
+## Loading and cache behavior
+
+The diff endpoint does not build Graph. Files shows a loading state while fetching the diff; Graph is requested separately when opened, with its own loading, failure and retry states. Concurrent requests share the same in-flight graph build. Completed graph results are cached for two seconds per diff revision; refreshing the review after that also rereads unchanged context files. Git blobs are read with cat-file batches and cached by immutable object ID, with a bounded cache. Working-tree reads use eight workers. Graph failures do not block review submission or Files. A saved review whose snapshot no longer matches the working tree asks you to inspect latest changes before building Graph.

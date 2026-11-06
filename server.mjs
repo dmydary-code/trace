@@ -43,10 +43,11 @@ export async function createTraceServer(options = {}) {
     }
     return currentSnapshot();
   }
+  const graphCache=new Map();
   async function currentSnapshot() {
     const data = await repository.snapshot();
     const routes = await detectRoutes(repository.repo, data.files);
-    return {...data, graph: await buildGraph(repository.repo, data), files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
+    return {...data, graph: null, files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
   }
   const server = http.createServer(async (req, res) => {
     try {
@@ -55,6 +56,17 @@ export async function createTraceServer(options = {}) {
       const navigation = req.method === 'GET' && ['/', '/index.html'].includes(url.pathname) && req.headers['sec-fetch-mode'] === 'navigate';
       if (req.headers['sec-fetch-site'] === 'cross-site' && !navigation) return json(res, 403, {error: 'Cross-site requests are not allowed'});
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, await snapshot());
+      if(req.method==='GET' && url.pathname==='/api/graph'){
+        const data=await snapshot();
+        if(url.searchParams.get('revision')!==data.revision)return json(res,409,{error:'Diff changed. Refresh before loading Graph.'});
+        if(data.graph)return json(res,200,{revision:data.revision,graph:data.graph});
+        if(submittedId && (await repository.snapshot()).revision!==data.revision)return json(res,409,{error:'This saved review differs from the working tree. Review latest changes to build its Graph.'});
+        let entry=graphCache.get(data.revision);
+        if(!entry || (!entry.pending && Date.now()-entry.created>2000)){
+          const promise=(options.graphBuilder||buildGraph)(repository.repo,data);entry={created:Date.now(),promise,pending:true};promise.finally(()=>{entry.pending=false;entry.created=Date.now();}).catch(()=>{});graphCache.clear();graphCache.set(data.revision,entry);promise.catch(()=>graphCache.delete(data.revision));
+        }
+        return json(res,200,{revision:data.revision,graph:await entry.promise});
+      }
       if(req.method==='POST' && url.pathname==='/api/client-ready'){
         if(req.headers['x-trace-token']!==token || req.headers.origin!==origin)return json(res,403,{error:'Open the review on the local server'});
         events.emit('client-ready');return json(res,200,{ok:true});

@@ -22,7 +22,7 @@ function fixture({codexFails=false,wrongVersion=false,disabled=false,broken=fals
   }
   return '';
  };
- return {calls,execute,canonical:async p=>p,read:async()=>JSON.stringify({version:'0.4.1'}),log:()=>{}};
+ return {calls,execute,pin:async()=>{},canonical:async p=>p,read:async()=>JSON.stringify({version:'0.4.1'}),log:()=>{}};
 }
 test('all continues to Claude after Codex failure and reports each outcome',async()=>{
  const f=fixture({codexFails:true});const result=await installAgents({target:'all',root,version:'0.4.1',...f});
