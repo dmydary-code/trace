@@ -8,6 +8,7 @@ Local code review for **Codex and Claude Code**. Explore changes, leave line com
 
 **Graph starts with changed files. Select a node to reveal connected code and tests, then inspect its diff or source on the right.** Spot changed code whose existing test did not change—and check what that test actually covers.
 
+- **Know which checkout you are reviewing.** See the current branch, the workspace/checkout’s absolute path, and whether it is a linked Git worktree, together with the base and comparison mode for the current diff.
 - **Explore freely.** Drag nodes, zoom with a trackpad or buttons, and resize the file preview. Selected nodes are centered without changing zoom.
 - **Find Usages in the diff.** Click an identifier, use **Cmd + click**, or press **Option + F7** after selecting it. Choose a result to jump to its file and line.
 - **Track progress.** Comment badges stay on nodes. Viewed files leave the graph; **Reset Viewed** restores them. **Reset graph** clears exploration while keeping review progress.
@@ -26,7 +27,7 @@ brew install trace-review
 trace-review install all
 ```
 
-Restart your agent. In Codex, ask **“Use Trace to review my changes.”** In Claude Code, run **`/trace:review`**. Or launch directly inside your repository:
+Restart your agent. In **Codex**, type **`$`** and select the **`review`** skill from the **Trace** plugin, then submit your request. You can also ask **“Use Trace to review my changes.”** In **Claude Code**, run **`/trace:review`**. Or launch directly inside your repository:
 
 ```sh
 trace-review
