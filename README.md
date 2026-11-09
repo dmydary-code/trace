@@ -27,7 +27,7 @@ brew install trace-review
 trace-review install all
 ```
 
-Restart your agent and enable/trust the Trace session hooks (in Codex: `/hooks`). These close the local viewer when its agent session ends; without an active session hook, the viewer closes after feedback is submitted. In **Codex**, type **`$`** and select the **`review`** skill from the **Trace** plugin, then submit your request. You can also ask **“Use Trace to review my changes.”** In **Claude Code**, run **`/trace:review`**. Or launch directly inside your repository:
+Restart your agent and enable/trust the Trace session hooks (in Codex: `/hooks`). These close the local viewer when its agent session ends; without an active session hook, it remains available while the browser is active and closes after two minutes without a heartbeat or when a detected owning agent exits. In **Codex**, type **`$`** and select the **`review`** skill from the **Trace** plugin, then submit your request. You can also ask **“Use Trace to review my changes.”** In **Claude Code**, run **`/trace:review`**. Or launch directly inside your repository:
 
 ```sh
 trace-review

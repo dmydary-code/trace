@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-07",
+  "baseline": "Trace 0.5.2 (product de6659e; HEAD a49a22c)",
+  "platform": {
+    "system": "Darwin",
+    "architecture": "arm64"
+  },
+  "product_code_modified": false,
+  "regression": [
+    {
+      "runtime": "Node 20.20.2",
+      "passed": 130,
+      "failed": 0
+    },
+    {
+      "runtime": "Node 22.23.4",
+      "passed": 130,
+      "failed": 0
+    },
+    {
+      "runtime": "Playwright 1.65.0 / Chromium + WebKit / Node 22",
+      "passed": 88,
+      "failed": 0
+    }
+  ],
+  "additional_geometry_rerun": {
+    "passed": 2,
+    "failed": 0
+  },
+  "acceptance": {
+    "node_assertions_failed": 8,
+    "browser_assertions_failed": 2,
+    "defect_categories": 8,
+    "skipped": 0,
+    "expected_failure_annotations": false
+  },
+  "not_executed": [
+    "Real Codex/Claude model and desktop sessions",
+    "Linux CI (workflow configured, not pushed or run)",
+    "Physical trackpad pinch",
+    "Native language builds"
+  ],
+  "refactor_started": false
+}

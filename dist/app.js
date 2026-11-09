@@ -1,6 +1,6 @@
-import {diffTokens, findDiffUsages, usageLineHtml} from './usages.mjs';
+import {diffTokens, findDiffUsages, usageLineHtml, primaryDiffDeclaration} from './usages.mjs';
 import {stableGraphLayout, revealGraphPath, fileCommentCount, routeGraphEdges, graphZoom} from './graph-layout.mjs';
-import {reviewPrompt, compactFileTree} from './core.mjs';
+import {reviewPrompt, compactFileTree, fileTreeOrder} from './core.mjs';
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
@@ -8,6 +8,7 @@ const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let continuingApproval=false;
+let activeCommentId=null, clientHeartbeat=null;
 let diffLoading=false, graphLoading=null, graphError=null;
 let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
@@ -93,7 +94,7 @@ function thread(c) {
   const name = session?.author?.name || 'Git author not configured';
   const words = session?.author?.name?.trim().split(/\s+/u) || [];
   const initials = words.length ? [words[0], ...(words.length > 1 ? [words.at(-1)] : [])].map(word => Array.from(word)[0]).join('').toLocaleUpperCase() : '?';
-  return `<div class="thread ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><p>${esc(c.body)}</p><div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
+  return `<div data-comment-id="${esc(c.id)}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><p>${esc(c.body)}</p><div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
 }
 function syncSubmitted(data) {
   activeReview = data; submitted = true; editor = null; editId = null;
@@ -132,22 +133,22 @@ function startReplies() {
     }
   }, 1500);
 }
-function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
+function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><p class="footnote">Enter to add · Shift+Enter for a new line</p><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 function fileCard(f) {
   const tokens={old:diffTokens(f.lines,'old',f.path),new:diffTokens(f.lines,'new',f.path)};
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card ${state.mode==='files' && r.done.includes(f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card ${state.mode==='files' && r.done.includes(f.path) && !r.comments.some(c=>c.id===activeCommentId&&c.path===f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
   if(diffLoading || !session){$('#feed').innerHTML='<div class="empty" role="status" aria-busy="true">Loading diff…</div>';return;}
   if(state.mode === 'graph') { renderGraph(); return; }
-  const list = files().filter(f => f.path.toLowerCase().includes(query)).sort((a,b) => a.path.localeCompare(b.path));
+  const list = fileTreeOrder(files(),query);
   $('#feed').innerHTML = list.map(fileCard).join('') || `<div class="empty">${esc(query?'No files match this search.':session?.emptyReason||'No changes to display')}<p>${esc(session?.repositoryPath||'')}</p></div>`;
   applyUsageHighlights();
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
-function counts() { $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'graph'); $('#route-info').hidden = true; $('#review').disabled = !session || submitted; tree(); renderFeed(); counts(); completionButtons(); }
+function counts() { updateCommentNavigation(); $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
+function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'graph'); $('#route-info').hidden = true; $('#review').disabled = !session || sendingReview; $('#review').setAttribute('aria-busy',String(sendingReview)); $('#review-label').textContent=sendingReview?'Sending…':submitted?'Review sent':'Send to agent'; $('#review-icon').textContent=submitted?'✓':'↗'; tree(); renderFeed(); counts(); completionButtons(); }
 function jump(id) { if(state.mode === 'graph') { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -159,6 +160,7 @@ document.addEventListener('click', e => {
   if (b.dataset.edit) { const c = review().comments.find(c => c.id === b.dataset.edit); editor = lineKey(c.path, c.index); editId = c.id; review().drafts[editor] = c.body; renderFeed(); $('#comment-body').focus(); }
 });
 document.addEventListener('input', e => { if (e.target.id === 'comment-body') { review().drafts[editor] = e.target.value; persist(); } });
+document.addEventListener('keydown',e=>{if(e.target.id==='comment-body'&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&!e.repeat){e.preventDefault();e.target.closest('form').requestSubmit();}});
 document.addEventListener('submit', e => {
   const form = e.target.closest('.composer'); if (!form) return; e.preventDefault(); const body = $('#comment-body').value.trim(); if (!body) return;
   const f = files().find(f => f.id === form.dataset.editorFile), index = +form.dataset.index, l = f.lines[index];
@@ -176,36 +178,49 @@ function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo:
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
 function openReview() {
-  const p = packet();
+  const p = submitted&&activeReview?activeReview:packet();
   $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
   $('#handoff-help').textContent = 'Only open comments from this revision are sent. If the code changes, refresh the diff before submitting.';
   $('#review-list').innerHTML = p.comments.map(c => `<div class="review-item"><code>${esc(c.path)}:${c.line} · ${c.side === 'old' ? 'old' : 'new'} version</code><p>${esc(c.body)}</p></div>`).join('') || '<p>Add line comments or describe your requested changes below.</p>';
-  $('#instruction').value = review().instruction; $('#send').hidden = false; $('#approve').hidden = false; $('#cancel-review').hidden = false;
+  $('#instruction').value = p.instruction||''; $('#instruction').disabled=submitted; $('#send').hidden = submitted; $('#approve').hidden = submitted; $('#cancel-review').hidden = submitted; if(submitted)$('#job-state').textContent='✓ Review sent. Agent replies appear in the comment threads.';
   $('#send').textContent = session.agent ? 'Send to Codex ↗' : 'Send to agent ↗'; dialogButtons(); $('#handoff').showModal();
 };
 $('#review').onclick = openReview;
 $('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
+function confirmSubmission(job,outcome){
+ syncSubmitted({...job.review,replies:job.review.replies||[]});render();showReviewSent(outcome);
+ $('#job-state').textContent=outcome==='approved'?'✓ Review approved':outcome==='cancelled'?'Review cancelled':'✓ Review sent. Awaiting agent replies.';
+ if(job.status==='submitted')return;
+ jobTimer=setInterval(async()=>{try{
+  const response=await fetch('/api/jobs/'+job.id);if(!response.ok)throw Error('Could not retrieve job status');const data=await response.json();
+  $('#job-state').textContent=data.status==='running'?'Codex is working…':(data.status==='succeeded'?'Done. Review the latest changes.':'The agent task failed.')+'\n'+data.output;
+  if(data.status!=='running'){clearInterval(jobTimer);jobTimer=null;dialogButtons();}
+ }catch(error){clearInterval(jobTimer);jobTimer=null;$('#job-state').textContent=error.message;dialogButtons();}},1500);
+}
+function matchesSubmission(review,payload){
+ return review&&review.sessionId===session.sessionId&&review.revision===payload.revision&&review.outcome===payload.outcome&&(review.instruction||'')===payload.instruction&&review.comments.length===payload.comments.length&&review.comments.every((c,i)=>c.id===payload.comments[i].id&&c.body===payload.comments[i].body);
+}
 async function send(outcome) {
-  if(sendingReview)return;
-  sendingReview=true;sendingCommentIds=new Set(packet(outcome).comments.map(c=>c.id));
-  $('#handoff').close();toast('Sending review…');renderFeed();
-  $('#send').disabled = true; $('#approve').disabled = true; $('#cancel-review').disabled = true; $('#job-state').textContent = 'Submitting review…';
-  try {
-    const response = await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify(packet(outcome))});
-    const job = await response.json(); if (!response.ok) throw new Error(job.error);
-    syncSubmitted({...job.review, replies: []}); render();
-    showReviewSent(outcome);
-    if (job.status === 'submitted') { /* submission confirmation stays visible */ const deliveryMessage = outcome === 'cancelled' ? 'Review cancelled.' : outcome === 'approved' ? 'Review approved. You can close this dialog.' : session.handoff === 'waiting-agent' ? 'Review delivered. Close this dialog to follow agent replies in your comment threads.' : 'Review saved. Your agent can read it with trace-review feedback --json and reply to each thread.'; dialogButtons(); return; }
-    toast('✓ Review sent — Codex is working…');
-    jobTimer = setInterval(async () => { try {
-      const res = await fetch('/api/jobs/' + job.id); if (!res.ok) throw new Error('Could not retrieve job status'); const j = await res.json();
-      $('#job-state').textContent = j.status === 'running' ? 'Codex is working…' : (j.status === 'succeeded' ? 'Done. Start a new review to inspect the changes.\n\n' : 'The agent task failed.\n') + j.output;
-      if (j.status !== 'running') { clearInterval(jobTimer); jobTimer = null; }
-    } catch (err) { clearInterval(jobTimer); jobTimer = null; $('#job-state').textContent = err.message; } }, 1500);
-  } catch (err) { $('#job-state').textContent = err.message;toast('Review was not sent: '+err.message);openReview(); }
-  finally {sendingReview=false;sendingCommentIds.clear();updatePendingComments();dialogButtons();}
+ if(sendingReview||submitted)return;
+ const payload=packet(outcome);let rejected=false;
+ sendingReview=true;sendingCommentIds=new Set(payload.comments.map(c=>c.id));
+ $('#handoff').close();toast('Sending review…');render();$('#job-state').textContent='Submitting review…';dialogButtons();
+ try{
+  const response=await fetch('/api/reviews',{method:'POST',headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
+  rejected=!response.ok;const job=await response.json();if(rejected)throw Error(job.error||'Review could not be submitted');
+  confirmSubmission(job,outcome);
+ }catch(error){
+  let latest=null;
+  try{const response=await fetch('/api/session',{signal:AbortSignal.timeout(5000)});if(response.ok)latest=await response.json();}catch{}
+  if(matchesSubmission(latest?.submittedReview,payload)){
+   confirmSubmission({id:latest.submittedReview.id,status:session.agent?'running':'submitted',review:latest.submittedReview},outcome);
+  }else{
+   const message=rejected||latest&&!latest.submittedReview?'Review was not sent: '+error.message:'Could not confirm delivery. Reconnect or reload to check the saved review before retrying.';
+   $('#job-state').textContent=message;toast(message);openReview();
+  }
+ }finally{sendingReview=false;sendingCommentIds.clear();updatePendingComments();render();dialogButtons();}
 }
 $('#send').onclick = () => send('changes_requested'); $('#approve').onclick = () => send('approved'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession() {
@@ -221,7 +236,7 @@ async function loadSession() {
     $('#refresh').hidden = false; editor = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
     diffLoading=false;render();
-    fetch('/api/client-ready',{method:'POST',headers:{'X-Trace-Token':session.token}}).catch(()=>{});
+    acknowledgeViewer();clearInterval(clientHeartbeat);clientHeartbeat=setInterval(acknowledgeViewer,session.viewerHeartbeatMs||5000);
   } catch (err) { diffLoading=false;$('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();
@@ -463,8 +478,10 @@ function openDiffUsages(target){
  const row=target?.closest('[data-usage-file]');if(!row)return;
  const name=target.dataset.symbol,side=row.dataset.usageSide;
  const results=findDiffUsages(files(),name,side);
+ const declaration=primaryDiffDeclaration(results,{path:files().find(f=>f.id===row.dataset.usageFile)?.path,index:+row.dataset.usageIndex});
+ const usageButton=(r,i)=>`<button data-usage-result="${i}"><strong>${esc(r.path)}:${r.line??''}</strong><code>${esc(r.text.trim())}</code></button>`;
  usageSelection={name,side};applyUsageHighlights();
- usagesDialog.innerHTML=`<div class="dialog-head"><h2>Find Usages: ${esc(name)}</h2><button data-close-usages aria-label="Close usages">×</button></div><p class="footnote">${results.length} matches in the ${side==='old'?'previous':'current'} side of this diff. Matches use identifier spelling, not resolved symbol identity.</p><div class="usage-results">${results.map((r,i)=>`<button data-usage-result="${i}"><strong>${esc(r.path)}:${r.line??''}</strong><code>${esc(r.text.trim())}</code></button>`).join('')||'<p>No matches in this diff.</p>'}</div>`;
+ usagesDialog.innerHTML=`<div class="dialog-head"><h2>Find Usages: ${esc(name)}</h2><button data-close-usages aria-label="Close usages">×</button></div><p class="footnote">${results.length} ${results.length===1?'match':'matches'} in the ${side==='old'?'previous':'current'} side of this diff. Matches use identifier spelling, not resolved symbol identity.</p><section class="usage-declaration" aria-label="Declaration in diff"><h3>Declaration</h3>${declaration?usageButton(declaration,results.indexOf(declaration)):'<p>No declaration found in this diff.</p>'}</section><h3>Usages in diff</h3><div class="usage-results">${results.map((r,i)=>r===declaration?'':usageButton(r,i)).join('')||'<p>No other matches in this diff.</p>'}</div>`;
  usagesDialog.querySelector('[data-close-usages]').onclick=()=>closeDiffUsages();
  usagesDialog.querySelectorAll('[data-usage-result]').forEach(button=>button.onclick=()=>{
   const result=results[+button.dataset.usageResult];review().done=review().done.filter(p=>p!==result.path);persist();query='';$('#search').value='';
@@ -526,3 +543,27 @@ function applyUsageHighlights(){
   for(const token of row.querySelectorAll('.diff-symbol'))if(+token.dataset.offset===result.start)token.classList.add('usage-token-match');
  }
 }
+
+function orderedComments(){
+ const order=new Map(fileTreeOrder(files()).map((f,i)=>[f.path,i]));
+ return [...review().comments].sort((a,b)=>(order.get(a.path)??Infinity)-(order.get(b.path)??Infinity)||a.index-b.index||a.id.localeCompare(b.id));
+}
+function updateCommentNavigation(){
+ const comments=orderedComments(),index=comments.findIndex(c=>c.id===activeCommentId),noun=comments.length===1?'comment':'comments';
+ $('#comment-position').textContent=index<0?`${comments.length} ${noun}`:`${index+1} / ${comments.length} ${noun}`;
+ $('#previous-comment').disabled=$('#next-comment').disabled=!comments.length;
+}
+async function navigateComment(direction){
+ const comments=orderedComments();if(!comments.length)return;
+ const current=comments.findIndex(c=>c.id===activeCommentId),index=current<0?(direction>0?0:comments.length-1):(current+direction+comments.length)%comments.length;
+ const target=comments[index];if(session.verifying)await loadSession();
+ activeCommentId=target.id;query='';$('#search').value='';editor=null;editId=null;
+ if(state.mode==='graph'){if(!session.graph)await loadGraph();selectGraphNode(target.path);}else renderFeed();
+ tree();counts();const element=document.querySelector(`[data-comment-id="${CSS.escape(target.id)}"]`);
+ if(element){element.focus({preventScroll:true});element.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
+}
+$('#previous-comment').onclick=()=>navigateComment(-1);
+$('#next-comment').onclick=()=>navigateComment(1);
+function acknowledgeViewer(){if(session)fetch('/api/client-ready',{method:'POST',headers:{'X-Trace-Token':session.token}}).catch(()=>{});}
+window.addEventListener('pageshow',acknowledgeViewer);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)acknowledgeViewer();});

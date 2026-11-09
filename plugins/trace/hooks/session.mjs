@@ -25,6 +25,13 @@ export async function sessionLease(id) {
   const record = JSON.parse(await readFile(path, 'utf8'));
   return {path, token:record.token, ownerPid:record.ownerPid};
 }
+// Infer ownership only when one unambiguous session belongs to this agent process.
+export async function ownedSessionLease(ownerPid){
+ if(!ownerPid)return null;
+ const names=await readdir(sessionDirectory()).catch(error=>{if(error.code==='ENOENT')return [];throw error;});
+ const records=await Promise.all(names.filter(name=>name.endsWith('.json')).map(async name=>{const path=join(sessionDirectory(),name);try{const record=JSON.parse(await readFile(path,'utf8'));return record.ownerPid===ownerPid?{path,token:record.token,ownerPid}:null;}catch{return null;}}));
+ const matches=records.filter(Boolean);return matches.length===1?matches[0]:null;
+}
 export async function handleSession(input) {
   if (!input.session_id) return;
   const path = sessionPath(input.session_id);

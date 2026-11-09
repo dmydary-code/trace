@@ -31,8 +31,59 @@ export function diffTokens(lines, side, path='') {
  return result;
 }
 export function findDiffUsages(files,name,side){
- return files.flatMap(file=>diffTokens(file.lines,side,file.path).filter(t=>t.name===name).map(t=>({...t,path:file.path,id:file.id,line:side==='old'?file.lines[t.index].old:file.lines[t.index].new,text:file.lines[t.index].text,side})));
+ return files.flatMap(file=>{const imports=diffImportRanges(file.lines,side,file.path);return diffTokens(file.lines,side,file.path).filter(t=>t.name===name&&!imports(t.index,t.start)).map(t=>({...t,path:file.path,id:file.id,line:side==='old'?file.lines[t.index].old:file.lines[t.index].new,text:file.lines[t.index].text,side}));});
 }
 export function usageLineHtml(text,tokens,escape){
  let offset=0,html='';for(const token of tokens){html+=escape(text.slice(offset,token.start))+`<span class="diff-symbol" tabindex="0" data-symbol="${escape(token.name)}" data-offset="${token.start}">${escape(token.name)}</span>`;offset=token.end;}return html+escape(text.slice(offset));
+}
+
+// Conservative declaration evidence in the displayed diff, not symbol resolution.
+export function isDiffDeclaration(result) {
+ const before=result.text.slice(0,result.start),after=result.text.slice(result.end);
+ if(/\b(?:return|throw|yield|new|await|import|from)\s*$/.test(before))return false;
+ if(/^\s*(?:(?:public|private|protected|static|readonly|declare)\s+)*$/.test(before)&&/^\s*[?!]?\s*:\s*[A-Za-z_$][\w$<>[\].| ?]*(?:[;=}]|$)/.test(after))return true;
+ if(result.path?.endsWith('.py')&&/^\s*$/.test(before)&&/^\s*(?::[^=]+)?=(?!=)/.test(after))return true;
+ if(result.path?.endsWith('.go')&&/^\s*$/.test(before)&&/^\s*:=/.test(after))return true;
+ if(/\b(?:class|interface|type|enum|struct|trait|protocol|function|def|fun|fn|const|let|var|val)\s+(?:\*\s*)?$/.test(before))return true;
+ if(/\b(?:const|let|var)\s+[^;=]+,\s*$/.test(before)&&/^\s*(?:[:=,;]|$)/.test(after))return true;
+ if(/^\s*(?:(?:export|default|public|private|protected|static|readonly|override|async|final|abstract|suspend)\s+)*$/.test(before)&&/^\s*\([^;]*\)\s*(?::[^={]+)?\s*(?:\{|=>)/.test(after))return true;
+ if(/^\s*(?:(?:public|private|protected|static|readonly|final|override)\s+)*(?:[A-Za-z_$][\w$<>[\]?.]*\s+)+$/.test(before)&&/^\s*(?:\([^;]*\)\s*\{|=|;)/.test(after))return true;
+ return false;
+}
+export function primaryDiffDeclaration(results, {path,index=Infinity} = {}) {
+ const declarations=results.filter(isDiffDeclaration);
+ return declarations.sort((a,b)=>{
+  const rank=r=>r.path===path?(r.index<=index?0:1):2;
+  return rank(a)-rank(b)||(rank(a)===0?b.index-a.index:a.path.localeCompare(b.path)||a.index-b.index);
+ })[0] || null;
+}
+
+// Exclude import bindings from matches while leaving their tokens clickable.
+// Ranges preserve columns, so an actual call after `import ...;` still counts.
+export function diffImportRanges(lines,side,path=''){
+ let source='';const offsets=new Map();
+ for(let index=0;index<lines.length;index++){
+  const line=lines[index];if(line.kind==='hunk'){source+='\n;\n';continue;}
+  if(side==='old'?line.kind==='add':line.kind==='del')continue;
+  offsets.set(index,source.length);source+=line.text+'\n';
+ }
+ let masked='',quote=null,block=false;
+ for(let i=0;i<source.length;i++){
+  const c=source[i],next=source[i+1];
+  if(block){if(c==='*'&&next==='/'){masked+='  ';i++;block=false;}else masked+=c==='\n'?'\n':' ';continue;}
+  if(quote){if(c==='\\'){masked+='  ';i++;}else if(c===quote){masked+=c;quote=null;}else masked+=c==='\n'?'\n':' ';continue;}
+  if(c==='/'&&next==='*'){masked+='  ';i++;block=true;continue;}
+  if(c==='/'&&next==='/' || c==='#'&&path.endsWith('.py')){while(i<source.length&&source[i]!=='\n'){masked+=' ';i++;}masked+='\n';continue;}
+  if(['"',"'",'`'].includes(c)){quote=c;masked+=c;continue;}
+  masked+=c;
+ }
+ let patterns;
+ if(path.endsWith('.py'))patterns=[/\bfrom\s+[\w.]+\s+import\s+(?:\([^)]*\)|[^\n;]+)/g,/\bimport\s+[^\n;]+/g];
+ else if(/\.rs$/.test(path))patterns=[/\buse\s+[^;]+;/g];
+ else if(/\.go$/.test(path))patterns=[/\bimport\s*(?:\([^)]*\)|(?:[\w.]+\s+)?["'][^"'\n]*["'])/g];
+ else if(path.endsWith('.cs'))patterns=[/\b(?:global\s+)?using\s+(?!\(|var\b)[^;\n]+;?/g];
+ else if(/\.(?:java|kt|kts|swift|cpp|cc|cxx|h|hpp)$/.test(path))patterns=[/\bimport\s+[^;\n]+;?/g,/^[ \t]*#[ \t]*include[^\n]*/gm];
+ else patterns=[/\bimport\s+(?![.(])(?:[^;"']*?\bfrom\s*)?(["'])[^\n]*?\1(?:\s*(?:with|assert)\s*\{[^}]*\})?[ \t]*;?/g,/\b(?:const|let|var|import)\s+[^;=\n]+=\s*(?:require|import)\s*\([^)]*\)[ \t]*;?/g];
+ const ranges=patterns.flatMap(pattern=>[...masked.matchAll(pattern)].map(match=>[match.index,match.index+match[0].length]));
+ return (index,column)=>{const offset=offsets.get(index);return offset!==undefined&&ranges.some(([start,end])=>offset+column>=start&&offset+column<end);};
 }

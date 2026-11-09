@@ -7,7 +7,7 @@ import {promisify} from 'node:util';
 import {createTraceServer} from '../server.mjs';
 import {openRepository} from '../lib/git.mjs';
 import {gitOutput} from '../lib/git-command.mjs';
-import {sessionLease} from '../plugins/trace/hooks/session.mjs';
+import {sessionLease, agentOwner, ownedSessionLease} from '../plugins/trace/hooks/session.mjs';
 import {browserFallback} from '../lib/browser-fallback.mjs';
 import {installAgents} from '../lib/install-agents.mjs';
 import {readReview, readSnapshot, addReply} from '../lib/reviews.mjs';
@@ -30,6 +30,7 @@ Review options:
   --merge-base      Compare against the merge base of REF and HEAD
   --staged          Review staged changes only
   --session-id ID   Bind viewer lifetime to an agent session (set by plugin hooks)
+  --viewer-idle-timeout SECONDS  Close an unbound viewer after browser inactivity (default: 120)
   --wait            Return feedback to the calling agent and exit on submission
   --json            Print newline-delimited JSON events
   --no-open         Print URL without opening a browser
@@ -50,7 +51,7 @@ const options = {repo: process.cwd(), port: 0, timeout: 1800};
 let target;
 try {
   if (command === 'install') target = args.shift();
-  const values = {'--session-id': 'agentSessionId', '--repo': 'repo', '--base': 'base', '--port': 'port', '--timeout': 'timeout', '--agent': 'agent', '--review': 'reviewId', '--comment': 'commentId', '--body-file': 'bodyFile', '--status': 'status'};
+  const values = {'--viewer-idle-timeout':'viewerIdleTimeout','--session-id': 'agentSessionId', '--repo': 'repo', '--base': 'base', '--port': 'port', '--timeout': 'timeout', '--agent': 'agent', '--review': 'reviewId', '--comment': 'commentId', '--body-file': 'bodyFile', '--status': 'status'};
   const flags = {'--merge-base': 'mergeBase', '--staged': 'staged', '--wait': 'wait', '--json': 'json', '--no-open': 'noOpen', '--browser-fallback':'browserFallback', '--help': 'help', '-h': 'help', '--version': 'version', '-v': 'version'};
   for (let i = 0; i < args.length; i++) {
     if (values[args[i]]) { const key = values[args[i]]; if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`Missing value for ${args[i]}`); options[key] = args[++i]; }
@@ -115,10 +116,13 @@ try {
       if (options.json) emit(data);
       else console.log(`Review ${data.outcome}: ${data.reviewPath}\n\n${data.prompt}`);
     };
+    if(options.viewerIdleTimeout!==undefined){options.viewerIdleTimeout=Number(options.viewerIdleTimeout);if(!Number.isFinite(options.viewerIdleTimeout)||options.viewerIdleTimeout<=0)throw Error('Viewer idle timeout must be greater than zero');}
     if (options.wait) {
+      options.ownerPid=agentOwner();
       const id=options.agentSessionId || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID;
       options.sessionLease=id ? await sessionLease(id).catch(error=>{if(options.agentSessionId)throw error;return null;}) : null;
-      if(!options.sessionLease)console.error('Trace: No agent session detected. Viewer will close after feedback; use plugin session hooks to keep replies visible.');
+      if(!options.sessionLease)options.sessionLease=await ownedSessionLease(options.ownerPid);
+      if(!options.sessionLease)console.error('Trace: No agent session detected. Viewer follows browser activity; enable session hooks to close it on /clear.');
       // Only the HTTP viewer stays alive after feedback; the calling agent resumes normally.
       const viewer = fork(join(root, 'lib/viewer.mjs'), [], {detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc']});
       let timer, finished = false;

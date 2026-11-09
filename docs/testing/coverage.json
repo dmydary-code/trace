@@ -1,0 +1,632 @@
+[
+  {
+    "id": "HP-01",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-02",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-03",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-04",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-05",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-06",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-07",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-08",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-09",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "HP-10",
+    "tests": "tests/integration/languages.test.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated protocol + browser",
+    "remaining": "Live models/host commands require the 20-combination interactive matrix."
+  },
+  {
+    "id": "D-01",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-02",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-03",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-04",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-05",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-06",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-07",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-08",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-09",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-10",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-11",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-12",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-13",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "D-14",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/recovery.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-01",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-02",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-03",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-04",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-05",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-06",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-07",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-08",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-09",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-10",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-11",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-12",
+    "tests": "tests/acceptance/known-gaps.test.mjs",
+    "coverage": "baseline failure",
+    "remaining": "No second feedback event reaches the original waiter. HTTP persistence alone passes."
+  },
+  {
+    "id": "R-13",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "R-14",
+    "tests": "tests/integration/contracts.test.mjs; tests/local.test.mjs; tests/e2e/interface.spec.mjs; tests/e2e/languages.spec.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "A-01",
+    "tests": "tests/integration/installer.test.mjs; tests/install-agents.test.mjs; tests/browser-fallback.test.mjs",
+    "coverage": "adapter coverage",
+    "remaining": "Real plugin installation/discovery and desktop acknowledgement need disposable-host runs."
+  },
+  {
+    "id": "A-02",
+    "tests": "tests/integration/installer.test.mjs; tests/install-agents.test.mjs; tests/browser-fallback.test.mjs",
+    "coverage": "adapter coverage",
+    "remaining": "Real plugin installation/discovery and desktop acknowledgement need disposable-host runs."
+  },
+  {
+    "id": "A-03",
+    "tests": "tests/integration/installer.test.mjs; tests/install-agents.test.mjs; tests/browser-fallback.test.mjs",
+    "coverage": "adapter coverage",
+    "remaining": "Real plugin installation/discovery and desktop acknowledgement need disposable-host runs."
+  },
+  {
+    "id": "A-04",
+    "tests": "tests/integration/installer.test.mjs; tests/install-agents.test.mjs; tests/browser-fallback.test.mjs",
+    "coverage": "adapter coverage",
+    "remaining": "Real plugin installation/discovery and desktop acknowledgement need disposable-host runs."
+  },
+  {
+    "id": "A-05",
+    "tests": "scripts/live-agent-acceptance.mjs",
+    "coverage": "live check not run",
+    "remaining": "Actual picker/command discovery cannot be certified with an adapter."
+  },
+  {
+    "id": "A-06",
+    "tests": "tests/browser-fallback.test.mjs; tests/local.test.mjs",
+    "coverage": "timer/API coverage; desktop manual",
+    "remaining": "The exact URL and acknowledgement timer are automated; opening actual desktop browser panes is manual."
+  },
+  {
+    "id": "A-07",
+    "tests": "tests/browser-fallback.test.mjs; tests/local.test.mjs",
+    "coverage": "timer/API coverage; desktop manual",
+    "remaining": "Post-acknowledgement blank preview and manual external fallback require a real host."
+  },
+  {
+    "id": "A-08",
+    "tests": "tests/integration/installer.test.mjs; tests/install-agents.test.mjs; tests/browser-fallback.test.mjs",
+    "coverage": "adapter coverage",
+    "remaining": "Real plugin installation/discovery and desktop acknowledgement need disposable-host runs."
+  },
+  {
+    "id": "L-01",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-02",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-03",
+    "tests": "tests/integration/lifecycle.test.mjs; scripts/live-agent-acceptance.mjs",
+    "coverage": "same/new-ID handler coverage; actual hosts manual",
+    "remaining": "Both transitions are exercised through real hook scripts; actual host event delivery and trust remain live checks."
+  },
+  {
+    "id": "L-04",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-05",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-06",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-07",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-08",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-09",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "L-10",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/acceptance/known-gaps.test.mjs",
+    "coverage": "startup race passes; in-flight Graph shutdown fails",
+    "remaining": "A blocked Git subprocess keeps the detached viewer process alive after session end. Exact mid-file-write cancellation is not certified."
+  },
+  {
+    "id": "L-11",
+    "tests": "tests/e2e/interface.spec.mjs",
+    "coverage": "automated browser + CLI",
+    "remaining": "Actual desktop tab lifecycle is a separate host check."
+  },
+  {
+    "id": "L-12",
+    "tests": "tests/integration/lifecycle.test.mjs; tests/session-lifecycle.test.mjs",
+    "coverage": "simulated lifecycle + real processes",
+    "remaining": "Actual host event delivery/trust is a separate live check."
+  },
+  {
+    "id": "N-01",
+    "tests": "tests/e2e/recovery.spec.mjs; tests/e2e/interface.spec.mjs; tests/integration/contracts.test.mjs",
+    "coverage": "automated faults",
+    "remaining": ""
+  },
+  {
+    "id": "N-02",
+    "tests": "tests/e2e/recovery.spec.mjs; tests/e2e/interface.spec.mjs; tests/integration/contracts.test.mjs",
+    "coverage": "automated faults",
+    "remaining": ""
+  },
+  {
+    "id": "N-03",
+    "tests": "tests/e2e/recovery.spec.mjs; tests/e2e/interface.spec.mjs; tests/integration/contracts.test.mjs",
+    "coverage": "automated faults",
+    "remaining": ""
+  },
+  {
+    "id": "N-04",
+    "tests": "tests/integration/contracts.test.mjs; tests/e2e/recovery.spec.mjs; tests/e2e/submission-recovery.spec.mjs",
+    "coverage": "automated recovery; fixed on 9 November",
+    "remaining": "Saved feedback is reconciled after a lost acknowledgement; no false not-sent state. Fixed on 9 November."
+  },
+  {
+    "id": "N-05",
+    "tests": "tests/e2e/recovery.spec.mjs; tests/e2e/interface.spec.mjs; tests/integration/contracts.test.mjs",
+    "coverage": "automated faults",
+    "remaining": ""
+  },
+  {
+    "id": "N-06",
+    "tests": "tests/e2e/recovery.spec.mjs; tests/e2e/interface.spec.mjs; tests/integration/contracts.test.mjs",
+    "coverage": "automated faults",
+    "remaining": ""
+  },
+  {
+    "id": "N-07",
+    "tests": "tests/integration/provider-failure.test.mjs; tests/e2e/interface.spec.mjs",
+    "coverage": "simulated provider failure",
+    "remaining": "Optional Codex child failure is simulated; live provider UI/auth behavior remains manual."
+  },
+  {
+    "id": "N-08",
+    "tests": "tests/e2e/recovery.spec.mjs; tests/e2e/interface.spec.mjs; tests/integration/contracts.test.mjs",
+    "coverage": "automated faults",
+    "remaining": ""
+  },
+  {
+    "id": "G-01",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-02",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-03",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-04",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-05",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-06",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-07",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-08",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-09",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-10",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-11",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-12",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-13",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-14",
+    "tests": "tests/acceptance/known-gaps.test.mjs; tests/integration/graph-contracts.test.mjs",
+    "coverage": "partial; baseline failure",
+    "remaining": "Comment/string import examples fabricate edges. Full alias/dynamic syntax semantics remain unsupported."
+  },
+  {
+    "id": "G-15",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-16",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "G-17",
+    "tests": "tests/integration/graph-contracts.test.mjs; tests/graph.test.mjs",
+    "coverage": "automated JS/TS contracts",
+    "remaining": "Other languages: nodes and file versions only, per approved scope."
+  },
+  {
+    "id": "UI-G-01",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-02",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-03",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-04",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-05",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "browser handler coverage; physical gesture manual",
+    "remaining": "Real trackpad pinch/pan is a hardware smoke check."
+  },
+  {
+    "id": "UI-G-06",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-07",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-08",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated browser + layout",
+    "remaining": ""
+  },
+  {
+    "id": "UI-G-09",
+    "tests": "tests/e2e/interface.spec.mjs; tests/graph-layout.test.mjs",
+    "coverage": "automated curated geometry",
+    "remaining": "Distinct paths, non-overlapping nodes and no edge intersections with unrelated nodes are checked on the curated topology; arbitrary graph planarity is not guaranteed."
+  },
+  {
+    "id": "UI-01",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "UI-02",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "UI-03",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "UI-04",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "UI-05",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "UI-06",
+    "tests": "tests/integration/usages-languages.test.mjs; tests/usages.test.mjs; tests/acceptance/known-gaps.test.mjs",
+    "coverage": "ten-language side/token matrix; native lexer failures",
+    "remaining": "Common identifier/side isolation passes for all ten languages. Python comments/multiline strings, Go len and C++ std have failing native contracts."
+  },
+  {
+    "id": "UI-07",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "UI-08",
+    "tests": "tests/e2e/interface.spec.mjs; tests/usages.test.mjs",
+    "coverage": "automated browser + lexer",
+    "remaining": ""
+  },
+  {
+    "id": "C-01",
+    "tests": "tests/integration/contracts.test.mjs; tests/e2e/interface.spec.mjs; tests/git-command.test.mjs; tests/release-version.test.mjs; tests/install-source.test.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "C-02",
+    "tests": "tests/integration/contracts.test.mjs; tests/e2e/interface.spec.mjs; tests/git-command.test.mjs; tests/release-version.test.mjs; tests/install-source.test.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "C-03",
+    "tests": "tests/integration/contracts.test.mjs; tests/e2e/interface.spec.mjs; tests/git-command.test.mjs; tests/release-version.test.mjs; tests/install-source.test.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "C-04",
+    "tests": "tests/integration/contracts.test.mjs; tests/e2e/interface.spec.mjs; tests/git-command.test.mjs; tests/release-version.test.mjs; tests/install-source.test.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  },
+  {
+    "id": "C-05",
+    "tests": "tests/integration/contracts.test.mjs; tests/e2e/interface.spec.mjs; tests/git-command.test.mjs; tests/release-version.test.mjs; tests/install-source.test.mjs",
+    "coverage": "automated",
+    "remaining": ""
+  }
+]

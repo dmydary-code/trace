@@ -1,0 +1,65 @@
+name: Trace regression tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      acceptance:
+        description: Run known failing acceptance contracts as a separate gate
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['20', '22']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+  browser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-${{ matrix.os }}
+          path: |
+            test-results/browser-results.json
+            playwright-report/
+          retention-days: 7
+  acceptance:
+    if: github.event_name == 'workflow_dispatch' && inputs.acceptance
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium webkit
+      - run: npm run test:acceptance
+      - run: npm run test:browser:acceptance
+        if: always()

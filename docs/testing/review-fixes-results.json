@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-09",
+  "node20": {
+    "passed": 160,
+    "failed": 0
+  },
+  "node22": {
+    "passed": 160,
+    "failed": 0
+  },
+  "chromium_and_webkit": {
+    "passed": 106,
+    "failed": 0
+  },
+  "remaining_acceptance_failures": 8,
+  "remaining_defect_categories": 7,
+  "release_version": "0.5.3",
+  "architecture_refactor_started": false
+}

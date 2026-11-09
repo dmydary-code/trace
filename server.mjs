@@ -35,11 +35,12 @@ export async function createTraceServer(options = {}) {
   }
   const token = randomBytes(24).toString('hex'), events = new EventEmitter(), jobs = new Map();
   const sessionId = randomUUID();
+  const viewerHeartbeatMs=Math.min(5000,(options.viewerIdleTimeout||120)*1000/3);
   let running = false, submitted = !!options.reviewId, submittedId = options.reviewId || null, origin;
   async function snapshot() {
     if (submittedId) {
       const data = await readSnapshot(repository.gitDir, submittedId);
-      return {...data, token, sessionId, handoff: 'saved-review', agent: options.agent || null, submittedReview: await readReview(repository.gitDir, submittedId)};
+      return {...data, token, sessionId, viewerHeartbeatMs, handoff: 'saved-review', agent: options.agent || null, submittedReview: await readReview(repository.gitDir, submittedId)};
     }
     return currentSnapshot();
   }
@@ -47,7 +48,7 @@ export async function createTraceServer(options = {}) {
   async function currentSnapshot() {
     const data = await repository.snapshot();
     const routes = await detectRoutes(repository.repo, data.files);
-    return {...data, graph: null, files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
+    return {...data, graph: null, files: data.files.map((f, i) => ({...f, route: routes[i]})), token, sessionId, viewerHeartbeatMs, handoff: options.wait ? 'waiting-agent' : 'inbox', agent: options.agent || null};
   }
   const server = http.createServer(async (req, res) => {
     try {

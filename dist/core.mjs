@@ -111,3 +111,9 @@ export function compactFileTree(files) {
  });
  return fold(root);
 }
+
+// Match the sidebar's depth-first folder order, including files at folder roots.
+export function fileTreeOrder(files, query = '') {
+ const flatten = nodes => nodes.flatMap(node => node.file ? [node.file] : flatten(node.children));
+ return flatten(compactFileTree(files.filter(file => file.path.toLowerCase().includes(query.toLowerCase()))));
+}
