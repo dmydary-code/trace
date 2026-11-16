@@ -7,9 +7,30 @@ test('UI-01/UI-G-07 Viewed collapses Files, hides Graph nodes and resets both',a
  await graph(page);await expect(page.locator('.graph-node:not(.context)')).toHaveCount(0);await page.locator('#reset-viewed').click();await expect(page.locator('.graph-node:not(.context)')).toHaveCount(1);await page.locator('#files-mode').click();await expect(page.locator('.diff')).toBeVisible();await expect(page.locator('.file-card .thread')).toContainText('Keep this feedback');
 });
 test('UI-02/03 sidebar, theme, search and sticky toolbar persist without changing comments',async({page,app,f})=>{
- await f.put('src/another.ts','export const another=1;\n'+'// long review fixture\n'.repeat(100));await load(page,app);await addComment(page,'Persistent feedback');await page.locator('#theme').click();const theme=await page.locator('html').getAttribute('data-theme');await page.locator('#sidebar-resizer').press('ArrowRight');const width=await page.locator('#sidebar-resizer').getAttribute('aria-valuenow');
- await page.getByLabel('Find a file').fill('pricing');await expect(page.locator('.file-card')).toHaveCount(1);await page.getByLabel('Find a file').fill('');await expect(page.locator('.file-card')).toHaveCount(2);await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme',theme);await expect(page.locator('#sidebar-resizer')).toHaveAttribute('aria-valuenow',width);await expect(page.locator('.file-card .thread')).toContainText('Persistent feedback');
+ await f.put('src/another.ts','export const another=1;\n'+'// long review fixture\n'.repeat(100));await load(page,app);await addComment(page,'Persistent feedback');await page.getByRole('button',{name:'Appearance',exact:true}).click();await page.getByLabel('Color scheme').selectOption('light');await page.keyboard.press('Escape');await page.locator('#sidebar-resizer').press('ArrowRight');const width=await page.locator('#sidebar-resizer').getAttribute('aria-valuenow');
+ await page.getByLabel('Find a file').fill('pricing');await expect(page.locator('.file-card')).toHaveCount(1);await page.getByLabel('Find a file').fill('');await expect(page.locator('.file-card')).toHaveCount(2);await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme','light');await expect(page.locator('#sidebar-resizer')).toHaveAttribute('aria-valuenow',width);await expect(page.locator('.file-card .thread')).toContainText('Persistent feedback');
  await page.locator('#toggle-sidebar').click();await expect(page.locator('body')).toHaveClass(/sidebar-collapsed/);await page.evaluate(()=>window.scrollTo(0,400));await expect.poll(()=>page.locator('main>.toolbar').evaluate(el=>el.getBoundingClientRect().top)).toBeLessThan(75);expect(await page.locator('main>.toolbar').evaluate(el=>el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(65);
+});
+test('New Year lights are optional, persist on reload and respect reduced motion',async({page,app})=>{
+ await load(page,app);
+ const lights=page.locator('.tree-lights'), garland=page.locator('.new-year-garland');
+ const appearance=page.getByRole('button',{name:'Appearance',exact:true});
+ await expect(garland).toBeHidden();
+ await addComment(page,'Check the header navigation');
+ await appearance.click();await page.getByLabel('New Year lights').check();
+ await page.getByLabel('Color scheme').selectOption('light');await page.reload();
+ await expect(garland).toBeVisible();await expect(lights).toBeVisible();
+ await expect(lights.locator('circle').first()).toHaveCSS('animation-name','none');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await expect(lights.locator('circle').first()).toHaveCSS('animation-name','tree-twinkle');
+ expect(await lights.locator('circle').evaluateAll(lamps=>new Set(lamps.map(l=>getComputedStyle(l).animationDelay)).size)).toBeGreaterThan(1);
+ await page.setViewportSize({width:360,height:780});
+ const strand=await garland.boundingBox(),button=await appearance.boundingBox();
+ expect(strand.y+strand.height).toBeLessThanOrEqual(button.y);
+ await page.locator('#comment-position').click();await expect(page.locator('#comment-menu')).toBeVisible();
+ await page.keyboard.press('Escape');await appearance.click();await page.getByLabel('New Year lights').uncheck();
+ await expect(garland).toBeHidden();await expect(lights).toBeHidden();
+ await expect(page.locator('html')).toHaveAttribute('data-theme','light');
 });
 test('UI-04/05/07 Find Usages matches same-side identifiers, highlights and navigates',async({page,app})=>{
  await load(page,app);const symbol=page.locator('.line.add .diff-symbol[data-symbol="subtotal"]').first();await expect(symbol).toHaveCSS('cursor','pointer');await symbol.click();await expect(page.locator('#diff-usages')).toBeVisible();await expect(page.locator('.usage-match')).toHaveCount(1);await expect(page.locator('.usage-token-match')).toHaveCount(1);

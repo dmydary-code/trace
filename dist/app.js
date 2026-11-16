@@ -74,7 +74,12 @@ resizer.onkeydown = event => {
 resizer.ondblclick = () => { state.sidebarWidth = 266; applySidebarWidth(); persist(); };
 window.addEventListener('resize', applySidebarWidth);
 function toast(message) { $('#toast').textContent = message; $('#toast').style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').style.display = 'none', 4000); }
-function applyTheme() { document.documentElement.dataset.theme = state.theme; $('#theme').textContent = state.theme === 'dark' ? '☀' : '☾'; $('#theme').setAttribute('aria-label', state.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'); }
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  document.documentElement.toggleAttribute('data-new-year', state.newYear === true);
+  $('#color-scheme').value = state.theme;
+  $('#new-year').checked = state.newYear === true;
+}
 const icons = {
  file: '<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/>',
  contract: '<rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h3"/>',
@@ -198,7 +203,8 @@ document.addEventListener('submit', e => {
   delete review().drafts[editor]; editor = null; editId = null; persist(); renderFeed(); counts(); toast('Comment added to review');
 });
 document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) { review().done.push(path); if (review().comments.some(c => c.id === activeCommentId && c.path === path)) activeCommentId = null; } persist(); tree(); counts(); renderFeed(); } });
-$('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; persist(); applyTheme(); };
+$('#color-scheme').onchange = e => { state.theme = e.target.value; persist(); applyTheme(); };
+$('#new-year').onchange = e => { state.newYear = e.target.checked; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
 $('#reset-viewed').onclick=()=>{review().done=[];persist();render();toast('Viewed marks cleared');};
