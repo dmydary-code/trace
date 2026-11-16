@@ -18,10 +18,10 @@ for(const [i,p] of projects.entries())for(const agent of ['codex','claude'])test
   for(const c of feedback.comments)await f.cli('reply','--review',feedback.id,'--comment',c.id,'--agent',agent,'--body-file',reply);
   await expect(page.locator('.agent-reply')).toHaveCount(2);await expect(page.locator('.comment-pending:visible')).toHaveCount(0);
   await page.locator('[data-resolve]').first().click();await expect(page.locator('.thread.resolved')).toHaveCount(1);await page.locator('[data-resolve]').first().click();await expect(page.locator('.thread.resolved')).toHaveCount(0);
-  const latestResponse=page.waitForResponse(r=>r.url().endsWith('/current')&&r.status()===200);await page.locator('#verify-latest').click();await latestResponse;const changedLine=p.fixed.split('\n').find((line,i)=>line!==p.after.split('\n')[i]);await expect(page.locator('#feed')).toContainText(changedLine.trim());
-  await page.locator('#approve-final').click();await expect(page.locator('#review-status-text')).toContainText(/approved|Approval saved/);
+  const latestResponse=page.waitForResponse(r=>r.url().includes('compose=1')&&r.status()===200);await page.locator('#verify-latest').click();await latestResponse;const changedLine=p.fixed.split('\n').find((line,i)=>line!==p.after.split('\n')[i]);await expect(page.locator('#feed')).toContainText(changedLine.trim());
+  await page.locator('#back-to-threads').click();await expect(page.locator('.agent-reply')).toHaveCount(2);
   expect(await f.git('log','--format=%s')).toBe('fixture base');await run.end();await eventually(()=>fetch(app.url).then(()=>false,()=>true));await freePort(app.url);
-  const reopened=await f.server({reviewId:feedback.id});const restored=await session(reopened);expect(restored.submittedReview.replies).toHaveLength(2);expect(restored.submittedReview.completion.outcome).toBe('approved');
+  const reopened=await f.server({reviewId:feedback.id});const restored=await session(reopened);expect(restored.submittedReview.replies).toHaveLength(2);expect(restored.submittedReview.completion).toBeNull();
   await info.attach('matrix-result',{body:JSON.stringify({language:p.id,agent,transport:'real CLI, simulated agent action',reviewId:feedback.id}),contentType:'application/json'});
  }finally{await f.dispose();}
 });

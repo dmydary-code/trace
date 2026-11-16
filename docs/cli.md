@@ -33,7 +33,11 @@ Renames, deletions, binary files, empty files, and mode changes remain visible. 
 
 For automation, `--wait --json` prints newline-delimited events: `ready` with the URL/session ID, then `feedback` with outcome, revision, anchors, instructions, and saved review path. The calling command exits after submission. With session hooks enabled, its local HTTP viewer stays available until that agent session ends. Without a session lease, browser heartbeats keep the viewer available across reloads; it closes after two minutes without browser activity, or when its detected owning agent process exits. Use `--viewer-idle-timeout SECONDS` to configure this fallback inactivity limit. Hooks are required to detect context clearing reliably. Reopen the saved review with `trace-review open --review ID`. No model process is kept alive by the viewer. The default timeout is 1800 seconds; set `--timeout 0` for no limit. Exit codes: 0 submitted, 1 error, 2 timeout, 3 cancelled, 130 interrupted. Match the `sessionId` when recovering a result with `trace-review feedback` so old feedback is not mistaken for a new submission.
 
-Each server accepts one submission. After submission it serves the saved diff, original line anchors and replies, even if the working tree changes. Use Review latest changes to inspect the updated code and Approve to complete the review. Approval is stored in `completion`, separately from the original feedback outcome, with the inspected revision and a saved snapshot. Start a new review to request further changes. Existing schema-1 reviews remain readable via `feedback`, but do not have a saved snapshot or stable thread IDs; start a new review to use threaded replies. Browser drafts are scoped by repository and revision; changed revisions do not automatically inherit old line anchors. The OS chooses an available loopback port unless `--port` is provided; browser draft storage is also scoped to that origin.
+`--listen --json` streams each submitted message in order to the same calling process. After the first feedback event the command stays available while the conversation is active. Both agent integrations use this mode. Keep the command running and read its output between replies.
+
+**Working tree** opens the original CLI comparison. **Commits** lists first-parent commits oldest first. An explicit base defines the range. Otherwise Trace uses the common ancestor with the remote default branch (or local main/master) on feature branches. On the default branch it starts with up to 20 recent commits. The starting boundary stays fixed in this viewer. The initial commit compares against the empty tree and merge commits compare against their first parent. **Overall** compares the range baseline with the current working tree, or the index for staged reviews.
+
+**Approve commit** saves a local mark for the full SHA in this worktree’s Git metadata. Sending a message and approving a commit are independent. Use the Messages selector to reopen earlier rounds, or Reply to continue at the original anchor. Existing saved reviews remain readable.
 
 ### Optional separate agent
 
@@ -85,11 +89,11 @@ Run this in the reviewed repository, or add `--repo PATH`. Use `--agent claude` 
 
 Statuses: `addressed`, `needs_input`, `not_changed`, `note`. These are agent-reported outcomes, not proof that checks passed. The reviewer controls Resolve in the UI. Replies are stored as immutable files, so simultaneous replies cannot overwrite one another. The viewer polls for replies every 1.5 seconds without replacing the diff or moving the reading position.
 
-Submitted threads are read-only apart from the browser-local Resolve marker. Start a new review for further feedback on edited code. Automatic re-anchoring and two-way follow-up messages within a submitted thread are not implemented.
+A follow-up preserves its original line, parent message and previous replies. Choose Review latest changes to discuss newly edited code.
 
 ## Claude Desktop preview fallback
 
-The review skill launches `trace-review review --wait --json --no-open --browser-fallback --repo /absolute/project/path`. Open the exact URL from the ready event in the Desktop Browser pane. If the page cannot confirm that it loaded and rendered the diff within eight seconds, Trace opens that same URL in the default external browser. This preserves one viewer and the original feedback session. A later failure can be handled by opening that exact URL externally; do not start another server.
+The review skill launches `trace-review review --listen --json --no-open --browser-fallback --repo /absolute/project/path`. Open the exact URL from the ready event in the Desktop Browser pane. If the page cannot confirm that it loaded and rendered the diff within eight seconds, Trace opens that same URL in the default external browser. This preserves one viewer and the original feedback session. A later failure can be handled by opening that exact URL externally; do not start another server.
 
 The review shows the absolute repository path, comparison base and mode, and whether it is a linked worktree. An empty diff explains staged-only filtering or a clean/current comparison; check that the agent and Trace use the same checkout. A committed change needs a suitable `--base` instead of the default HEAD comparison.
 

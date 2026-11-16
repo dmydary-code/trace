@@ -7,13 +7,17 @@ let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}
 const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
-let continuingApproval=false;
+let loadGeneration = 0;
+let viewParams = new URLSearchParams(location.search);
+let replyTarget = null;
+const scopeOf = () => session?.scope || session?.submittedReview?.scope || 'changes';
+const requestUrl = (path, params = viewParams) => path + (params.size ? '?' + params : '');
 let activeCommentId=null, clientHeartbeat=null;
 let diffLoading=false, graphLoading=null, graphError=null;
 let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
-const key = () => session ? `${session.repositoryId}:${session.verifying && activeReview ? activeReview.revision : session.revision}` : 'disconnected';
+const key = () => session ? `${session.repositoryId}:${scopeOf()}:${session.submittedReview?.id || ('draft-' + (session.rounds?.at(-1) || 'first'))}:${session.verifying && activeReview ? activeReview.revision : session.revision}` : 'disconnected';
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
 const files = () => session?.files || [];
 function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Copy your review before leaving.'); } }
@@ -94,7 +98,7 @@ function thread(c) {
   const name = session?.author?.name || 'Git author not configured';
   const words = session?.author?.name?.trim().split(/\s+/u) || [];
   const initials = words.length ? [words[0], ...(words.length > 1 ? [words.at(-1)] : [])].map(word => Array.from(word)[0]).join('').toLocaleUpperCase() : '?';
-  return `<div data-comment-id="${esc(c.id)}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><p>${esc(c.body)}</p><div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
+  return `<div data-comment-id="${esc(c.id)}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><div class="thread-history">${submitted ? priorMessages() : ''}</div><p>${esc(c.body)}</p>${submitted ? `<button data-followup="${esc(c.id)}">Reply</button>` : ''}<div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
 }
 function syncSubmitted(data) {
   activeReview = data; submitted = true; editor = null; editId = null;
@@ -105,10 +109,10 @@ function syncSubmitted(data) {
   $('#instruction').disabled = true;
   $('#refresh').hidden = true;
   $('#review-status').hidden = false;
-  $('#review-status-text').textContent = data.completion || data.outcome === 'approved' ? 'Review approved. Original comments and agent replies are saved below.' : data.outcome === 'changes_requested' ? 'Review submitted. Follow agent replies here, then review the latest changes and approve.' : 'Review cancelled.';
-  $('#reply-connection').textContent = data.completion || data.outcome === 'approved' ? 'Approval saved locally. It does not merge or commit changes.' : data.outcome === 'cancelled' ? 'No approval was recorded.' : 'Agent replies update automatically.';
+  $('#review-status-text').textContent = data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. You can reply here or start another message.';
+  $('#reply-connection').textContent = 'Agent replies update automatically.';
   $('#general-thread').hidden = !data.instruction;
-  $('#general-instruction').textContent = data.instruction;
+  $('#general-instruction').innerHTML = priorMessages() + esc(data.instruction || '');
   $('#general-replies').innerHTML = replies('review');
   completionButtons(); startReplies();
 
@@ -118,9 +122,11 @@ function startReplies() {
   if (!activeReview || activeReview.outcome !== 'changes_requested' || activeReview.completion) return;
   replyTimer = setInterval(async () => {
     try {
-      const response = await fetch('/api/reviews/' + activeReview.id);
+      const watching = activeReview;
+      const response = await fetch('/api/reviews/' + watching.id);
       if (!response.ok) throw new Error('Viewer unavailable');
       const data = await response.json();
+      if (activeReview?.id !== data.id) return;
       if (data.completion && !activeReview.completion) { syncSubmitted(data); render(); return; }
       if (JSON.stringify(data.replies) !== JSON.stringify(activeReview.replies)) {
         activeReview = data;
@@ -130,7 +136,7 @@ function startReplies() {
       }
       $('#reply-connection').textContent = 'Agent replies update automatically. Statuses are reported by the agent; resolve threads after checking the fix.';
     } catch {
-      $('#reply-connection').textContent = `Viewer disconnected. Reopen saved threads: trace-review open --review ${activeReview.id}`;
+      $('#reply-connection').textContent = `Viewer disconnected. Reopen saved threads: trace-review open --review ${activeReview?.id || ''}`;
     }
   }, 1500);
 }
@@ -153,6 +159,7 @@ function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttri
 function jump(id) { if(state.mode === 'graph') { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.followup) openFollowup(b.dataset.followup);
   if (b.dataset.file) jump(b.dataset.file);
   if (b.dataset.comment) { const f = files().find(f => f.id === b.dataset.comment); editor = lineKey(f.path, +b.dataset.index); editId = null; renderFeed(); $('#comment-body').focus(); }
   if (b.hasAttribute('data-cancel')) { editor = null; editId = null; renderFeed(); }
@@ -175,15 +182,16 @@ $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); rend
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
 $('#reset-viewed').onclick=()=>{review().done=[];persist();render();toast('Viewed marks cleared');};
 $('#toggle-sidebar').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); render(); };
-function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
+function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, commit: session.commit, previousId: session.rounds?.at(-1) || null, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
-function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#approve').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
+function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
 function openReview() {
   const p = submitted&&activeReview?activeReview:packet();
+  $('#handoff h2').textContent = session.commit ? 'Message on ' + session.commit.sha.slice(0, 8) : 'Message to agent';
   $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
   $('#handoff-help').textContent = 'Only open comments from this revision are sent. If the code changes, refresh the diff before submitting.';
   $('#review-list').innerHTML = p.comments.map(c => `<div class="review-item"><code>${esc(c.path)}:${c.line} · ${c.side === 'old' ? 'old' : 'new'} version</code><p>${esc(c.body)}</p></div>`).join('') || '<p>Add line comments or describe your requested changes below.</p>';
-  $('#instruction').value = p.instruction||''; $('#instruction').disabled=submitted; $('#send').hidden = submitted; $('#approve').hidden = submitted; $('#cancel-review').hidden = submitted; if(submitted)$('#job-state').textContent='✓ Review sent. Agent replies appear in the comment threads.';
+  $('#instruction').value = p.instruction||''; $('#instruction').disabled=submitted; $('#send').hidden = submitted; $('#cancel-review').hidden = submitted; if(submitted)$('#job-state').textContent='✓ Review sent. Agent replies appear in the comment threads.';
   $('#send').textContent = session.agent ? 'Send to Codex ↗' : 'Send to agent ↗'; dialogButtons(); $('#handoff').showModal();
 };
 $('#review').onclick = openReview;
@@ -191,9 +199,13 @@ $('#instruction').oninput = e => { review().instruction = e.target.value; persis
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
 function confirmSubmission(job,outcome){
- syncSubmitted({...job.review,replies:job.review.replies||[]});render();$('#handoff').close();toast(outcome==='approved'?'✓ Review approved':outcome==='cancelled'?'Review cancelled':'✓ Review sent');
- if(outcome==='approved')continueAfterApproval(job.review);
- $('#job-state').textContent=outcome==='approved'?'✓ Review approved':outcome==='cancelled'?'Review cancelled':'✓ Review sent. Awaiting agent replies.';
+ const viewed = [...review().done];
+ session.rounds = [...new Set([...(session.rounds || []), job.review.id])];
+ session.submittedReview = job.review;
+ review().done = viewed;
+ setLocation(new URLSearchParams({scope:scopeOf(), round:job.review.id}), true);
+ syncSubmitted({...job.review,replies:job.review.replies||[]});render();$('#handoff').close();toast(outcome === 'cancelled' ? 'Review cancelled' : '✓ Review sent');
+ $('#job-state').textContent=outcome==='cancelled'?'Review cancelled':'✓ Review sent. Awaiting agent replies.';
  if(job.status==='submitted')return;
  jobTimer=setInterval(async()=>{try{
   const response=await fetch('/api/jobs/'+job.id);if(!response.ok)throw Error('Could not retrieve job status');const data=await response.json();
@@ -210,12 +222,12 @@ async function send(outcome) {
  sendingReview=true;sendingCommentIds=new Set(payload.comments.map(c=>c.id));
  $('#instruction').disabled=true;render();$('#job-state').textContent='Sending review…';dialogButtons();
  try{
-  const response=await fetch('/api/reviews',{method:'POST',headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
+  const response=await fetch(requestUrl('/api/reviews',new URLSearchParams({scope:scopeOf()})),{method:'POST',headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
   rejected=!response.ok;const job=await response.json();if(rejected)throw Error(job.error||'Review could not be submitted');
   confirmSubmission(job,outcome);
  }catch(error){
   let latest=null;
-  try{const response=await fetch('/api/session',{signal:AbortSignal.timeout(5000)});if(response.ok)latest=await response.json();}catch{}
+  try{const response=await fetch(requestUrl('/api/session', new URLSearchParams({scope:scopeOf()})),{signal:AbortSignal.timeout(5000)});if(response.ok)latest=await response.json();}catch{}
   if(matchesSubmission(latest?.submittedReview,payload)){
    confirmSubmission({id:latest.submittedReview.id,status:session.agent?'running':'submitted',review:latest.submittedReview},outcome);
   }else{
@@ -224,22 +236,45 @@ async function send(outcome) {
   }
  }finally{sendingReview=false;$('#instruction').disabled=submitted;sendingCommentIds.clear();updatePendingComments();render();dialogButtons();}
 }
-$('#send').onclick = () => send('changes_requested'); $('#approve').onclick = () => send('approved'); $('#cancel-review').onclick = () => send('cancelled');
-async function loadSession() {
+$('#send').onclick = () => send('changes_requested'); $('#cancel-review').onclick = () => send('cancelled');
+async function loadSession(params = viewParams) {
+  const generation = ++loadGeneration;
+  const previousScope = scopeOf();
   diffLoading=true;graphError=null;renderFeed();
   try {
-    const res = await fetch('/api/session'); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
-    const next = await res.json(); if (next.sessionId !== session?.sessionId) submitted = false; session = next;
+    const res = await fetch(requestUrl('/api/session', params)); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
+    const next = await res.json();
+    if (generation !== loadGeneration) return;
+    if (!next.scope && next.submittedReview) {
+      return loadSession(new URLSearchParams({scope:next.submittedReview.scope || 'changes', round:next.submittedReview.id}));
+    }
+    viewParams = params;
+    if (next.sessionId !== session?.sessionId) submitted = false; session = next;
     $('#repo').textContent = session.repo;$('#repo').title=session.repositoryPath||session.repo;
     let locationInfo=$('#repository-location');if(!locationInfo){locationInfo=document.createElement('p');locationInfo.id='repository-location';locationInfo.className='footnote';$('.intro').append(locationInfo);}
     locationInfo.textContent=`${session.repositoryPath||session.repo} · ${session.comparison} against ${session.base}${session.isWorktree?' · Git worktree':''}`; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
+    if (session.commit) {
+      $('#title').textContent = session.commit.subject;
+      $('#branch').textContent = session.commit.sha.slice(0, 10) + ' · ' + session.commit.author;
+    } else if (session.scope === 'overall') $('#title').textContent = 'Overall changes';
+    $('#commit-body').hidden = !session.commit?.body;
+    $('#commit-body').textContent = session.commit?.body || '';
+    if (previousScope !== scopeOf()) {
+      activePath = ''; query = ''; $('#search').value = ''; activeCommentId = null;
+      usageSelection = null; selectedNode = openedNode = null; revealedNodes.clear(); expandedNodes.clear();
+    }
     $('#detected').textContent = 'Local dependency graph';
     clearInterval(replyTimer); activeReview = null; submitted = false; $('#instruction').disabled = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
-    $('#refresh').hidden = false; editor = null;
+    $('#refresh').hidden = false; editor = null; editId = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
+    else if (next.rounds?.length) {
+      $('#review-status').hidden = false;
+      $('#review-status-text').textContent = 'Add a message on this version or return to earlier threads.';
+      $('#reply-connection').textContent = '';
+    }
     diffLoading=false;render();
     acknowledgeViewer();clearInterval(clientHeartbeat);clientHeartbeat=setInterval(acknowledgeViewer,session.viewerHeartbeatMs||5000);
-  } catch (err) { diffLoading=false;$('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
+  } catch (err) { if (generation !== loadGeneration) return; diffLoading=false;$('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
 }
 $('#refresh').onclick = () => loadSession();
 let selectedNode = null, openedNode = null, revealedNodes = new Set(), expandedNodes = new Set(), graphRevision = null, draggedPositions = new Map(), suppressNodeClickUntil = 0, graphScale = 1;
@@ -267,7 +302,7 @@ function resetGraph() {
 }
 async function loadGraph(){
  const target=session;if(!target||graphLoading===target)return;graphLoading=target;
- try{const response=await fetch('/api/graph?revision='+encodeURIComponent(target.revision)+(target.verifying?'&view=current':''));const data=await response.json();if(!response.ok)throw new Error(data.error);if(session===target){target.graph=data.graph;graphError=null;}}
+ try{const response=await fetch(requestUrl('/api/graph',new URLSearchParams([...viewParams, ['revision',target.revision]])));const data=await response.json();if(!response.ok)throw new Error(data.error);if(session===target){target.graph=data.graph;graphError=null;}}
  catch(error){if(session===target)graphError=error.message;}
  finally{if(graphLoading===target)graphLoading=null;if(session===target&&state.mode==='graph')renderGraph();}
 }
@@ -307,7 +342,8 @@ function renderGraph() {
   }).join('');
   const related=graph.edges.filter(e=>e.source===selectedNode || e.target===selectedNode);
   const connections=selectedNode && related.length ? `<details class="graph-connections" open><summary>Connections (${related.length})</summary>${related.map(e=>`<button class="graph-connection" data-select-related="${esc(e.source===selectedNode?e.target:e.source)}"><span>${esc(e.source===selectedNode?'→':'←')} ${esc(e.source===selectedNode?e.target:e.source)}</span><small>${esc(e.kind)} ${esc(e.change||'')}</small></button>`).join('')}</details>` : '';
-  const nodes=visible.map(n=>{const p=positions.get(n.path); const commentCount=fileCommentCount(review().comments,n.path); const status=({'A':'+','?':'+','M':'~','D':'−','R':'→'})[n.status] || '';return `<g role="button" tabindex="0" aria-label="Select ${esc(n.path)}" data-node="${esc(n.path)}" class="graph-node ${esc(n.test)} ${n.changed?'':'context'} ${selectedNode===n.path?'selected':''}" transform="translate(${p.x-115},${p.y-24})"><title>${esc(n.oldPath ? n.oldPath+' → '+n.path : n.path)}</title><rect width="230" height="48" rx="9"/><text x="12" y="20">${esc(n.icon)} ${esc(n.path.split('/').at(-1).slice(0,23))}</text><text class="graph-path" x="12" y="37">${esc(n.path.length>32?'…'+n.path.slice(-31):n.path)}</text><text x="211" y="20">${status}</text>${commentCount?`<g class="graph-comment-badge" aria-label="${commentCount} comments"><title>${commentCount} comments</title><rect x="210" y="29" width="${commentCount>99?34:26}" height="22" rx="11"/><text x="${commentCount>99?227:223}" y="44" text-anchor="middle">${commentCount>99?'99+':commentCount}</text></g>`:''}</g>`;}).join('');
+  const navigationComments = navigableComments();
+  const nodes=visible.map(n=>{const p=positions.get(n.path); const commentCount=fileCommentCount(navigationComments,n.path); const status=({'A':'+','?':'+','M':'~','D':'−','R':'→'})[n.status] || '';return `<g role="button" tabindex="0" aria-label="Select ${esc(n.path)}" data-node="${esc(n.path)}" class="graph-node ${esc(n.test)} ${n.changed?'':'context'} ${selectedNode===n.path?'selected':''}" transform="translate(${p.x-115},${p.y-24})"><title>${esc(n.oldPath ? n.oldPath+' → '+n.path : n.path)}</title><rect width="230" height="48" rx="9"/><text x="12" y="20">${esc(n.icon)} ${esc(n.path.split('/').at(-1).slice(0,23))}</text><text class="graph-path" x="12" y="37">${esc(n.path.length>32?'…'+n.path.slice(-31):n.path)}</text><text x="211" y="20">${status}</text>${commentCount?`<g class="graph-comment-badge" aria-label="${commentCount} comments"><title>${commentCount} comments</title><rect x="210" y="29" width="${commentCount>99?34:26}" height="22" rx="11"/><text x="${commentCount>99?227:223}" y="44" text-anchor="middle">${commentCount>99?'99+':commentCount}</text></g>`:''}</g>`;}).join('');
   $('#feed').innerHTML=`<div class="graph-layout"><section class="graph-canvas"><div class="graph-legend"><span class="code">● Code</span><span class="unit">● Unit</span><span class="integration">● Integration</span><span class="e2e">● E2E</span><span>● Unclassified test</span><span>━ Imports</span><span>┄ Calls</span><span>··· Uses type</span></div><p class="footnote">Select a node to reveal connected context. Tree branches group dependencies. All connections, including cycles and shared dependencies, appear below the selected file.</p><div class="graph-selection"><span>${esc(selectedNode || 'Select a file')}</span><div class="graph-controls" role="group" aria-label="Graph controls"><button id="graph-zoom-out" aria-label="Zoom out">−</button><output id="graph-zoom-value" aria-live="polite">${Math.round(graphScale*100)}%</output><button id="graph-zoom-in" aria-label="Zoom in">+</button><button id="reset-graph" title="Return to the initial review graph">Reset graph</button></div></div><div class="graph-viewport" tabindex="0" aria-label="Graph canvas"><div class="graph-stage"><svg class="graph-svg" viewBox="0 0 ${width} ${height}" style="width:${width*graphScale}px;height:${height*graphScale}px;min-width:0" aria-label="File dependency graph">${lines}${nodes}</svg></div></div>${connections}${!visible.length?`<p>${esc(query?'No files match this search.':session?.emptyReason||'No unreviewed changed files. Use Reset Viewed to restore reviewed files.')}</p>`:''}</section>${openedNode?'<div id="graph-detail-resizer" role="separator" tabindex="0" aria-label="Resize file preview" aria-orientation="vertical" aria-controls="graph-file-content" title="Drag to resize file preview"></div><section class="graph-detail"><div class="graph-detail-toolbar"><span id="graph-preview-label" class="graph-preview-label" hidden>Preview · Not part of this diff</span><button id="close-graph-file" aria-label="Close file" title="Close file">×</button></div><div id="graph-file-content"></div></section>':''}</div>`;
   const viewport=$('#feed .graph-viewport'), graphSvg=$('#feed .graph-svg');
   const stage=$('#feed .graph-stage'),padX=viewport.clientWidth/2,padY=viewport.clientHeight/2;
@@ -436,56 +472,117 @@ function renderGraph() {
 render(); if (local) loadSession();
 
 function completionButtons() {
-  const canFinish = activeReview?.outcome === 'changes_requested' && !activeReview.completion;
-  for (const selector of ['#approve-top', '#approve-end']) {
-    $(selector).disabled = !session || submitted && !canFinish;
-    $(selector).textContent = activeReview?.completion || activeReview?.outcome === 'approved' ? 'Approved ✓' : 'Approve';
-  }
-  $('#verify-latest').hidden = !canFinish;
-  $('#verify-latest').textContent = session?.verifying ? 'Refresh latest changes' : 'Review latest changes';
-  $('#verify-latest').title = 'Checks the Git diff on disk. If files have not changed, the displayed diff stays the same.';
-  $('#back-to-threads').hidden = !session?.verifying;
-  $('#approve-final').hidden = !canFinish;
+  const commit = session?.commit;
+  $('#timeline-open').textContent = commit ? '← Commits' : 'Commits';
+  $('#commit-approve').hidden = !commit;
+  $('#commit-approve').disabled = !commit || commit.approved;
+  $('#commit-approve').textContent = commit?.approved ? 'Approved ✓' : 'Approve commit';
+  $('#working-scope').textContent = session?.comparison === 'staged' ? 'Staged changes' : 'Working tree';
+  $('#working-scope').setAttribute('aria-pressed', String(scopeOf() === 'changes'));
+  $('#overall-scope').setAttribute('aria-pressed', String(scopeOf() === 'overall'));
+  const inspectingLatest = viewParams.has('compose') && session?.rounds?.length && !commit;
+  $('#verify-latest').hidden = !submitted && !inspectingLatest;
+  $('#verify-latest').textContent = commit ? 'New message' : inspectingLatest ? 'Refresh latest changes' : 'Review latest changes';
+  $('#back-to-threads').hidden = submitted || !session?.rounds?.length;
+  const ids = session?.rounds || [];
+  $('#round-picker').hidden = !ids.length;
+  $('#rounds').innerHTML = ids.map((id, i) => `<option value="${esc(id)}" ${id === activeReview?.id ? 'selected' : ''}>Message ${i + 1}</option>`).join('') + `<option value="" ${!submitted ? 'selected' : ''}>New message</option>`;
 }
-async function verifyLatest() {
-  const button=$('#verify-latest');
-  if(button.disabled)return;
-  const previousRevision=session?.revision, wasVerifying=!!session?.verifying;
-  button.disabled=true;button.textContent='Checking…';button.setAttribute('aria-busy','true');
+function priorMessages() {
+  return (activeReview?.thread || []).map(message => `<div class="previous-message"><strong>${esc(message.author)}</strong><p>${esc(message.body)}</p></div>`).join('');
+}
+function setLocation(params, replace = false) {
+  viewParams = params;
+  history[replace ? 'replaceState' : 'pushState'](null, '', '?' + params);
+}
+async function navigate(scope, details = {}) {
+  if (sendingReview) return;
+  const params = new URLSearchParams({scope, ...details});
+  setLocation(params);
+  await loadSession(params);
+  window.scrollTo(0, 0);
+}
+window.addEventListener('popstate', () => loadSession(new URLSearchParams(location.search)));
+$('#working-scope').onclick = () => navigate('changes');
+$('#overall-scope').onclick = () => navigate('overall');
+$('#verify-latest').onclick = async () => {
+  const previous = session;
+  const refreshing = viewParams.has('compose');
+  await navigate(scopeOf(), {compose:'1'});
+  if (session === previous || session.commit) return;
+  toast(refreshing && previous.revision === session.revision ? 'No new changes on disk.' : 'Showing latest changes.');
+};
+$('#back-to-threads').onclick = () => navigate(scopeOf());
+$('#rounds').onchange = e => navigate(scopeOf(), e.target.value ? {round:e.target.value} : {compose:'1'});
+$('#timeline-close').onclick = () => $('#timeline').close();
+$('#timeline-overall').onclick = () => { $('#timeline').close(); navigate('overall'); };
+$('#timeline-open').onclick = async () => {
+  const dialog = $('#timeline');
+  dialog.showModal();
+  $('#commit-list').replaceChildren();
+  $('#timeline-range').textContent = 'Loading commits…';
   try {
-    const response = await fetch(`/api/reviews/${activeReview.id}/current`);
-    const data = await response.json(); if (!response.ok) throw new Error(data.error);
-    session = data; editor = null; editId = null;
-    $('#review-status-text').textContent = 'Latest changes · inspect this diff before approving. Original comment threads are preserved in the previous view.';
-    $('#general-thread').hidden = true;
-    $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`;
-    render();
-    if(wasVerifying && data.revision===previousRevision){toast('No new changes — files on disk match the displayed diff.');}
-    else {toast(data.revision===previousRevision?'You are viewing the latest changes.':'Latest changes loaded.');document.querySelector('main').scrollIntoView({block:'start'});}
-  } catch (error) { toast(error.message); }
-  finally {button.disabled=false;button.removeAttribute('aria-busy');completionButtons();}
-}
-async function approveReview() {
-  if (!submitted) { openReview(); return; }
-  if (!activeReview || activeReview.completion || activeReview.outcome !== 'changes_requested') return;
-  if (!session.verifying) { await verifyLatest(); toast('Inspect the latest diff, then click Approve to finish.'); return; }
-  $('#approve-final').disabled = true;
+    const response = await fetch('/api/timeline');
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error);
+    $('#timeline-range').textContent = data.commits.length ? `Since ${data.label} · oldest first` : 'No commits in this range.';
+    $('#commit-list').innerHTML = data.commits.map(c => `<li><button data-sha="${esc(c.sha)}"><span class="commit-subject">${esc(c.subject || '(no subject)')}</span><small>${esc(c.sha.slice(0, 8))} · ${esc(c.author)} · ${esc(new Date(c.date).toLocaleDateString())}</small>${c.approved ? '<span class="commit-mark">Approved ✓</span>' : ''}</button></li>`).join('');
+    const current = $('#commit-list').querySelector('[data-sha="' + CSS.escape(scopeOf()) + '"]');
+    if (current && dialog.open) {
+      current.setAttribute('aria-current', 'true');
+      current.focus();
+    }
+  } catch (error) { $('#timeline-range').textContent = error.message; }
+};
+$('#commit-list').onclick = e => {
+  const button = e.target.closest('button[data-sha]');
+  if (button) { $('#timeline').close(); navigate(button.dataset.sha); }
+};
+$('#commit-approve').onclick = async () => {
+  const current = session;
+  $('#commit-approve').disabled = true;
   try {
-    const response = await fetch(`/api/reviews/${activeReview.id}/approve`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token}, body: JSON.stringify({revision: session.revision})});
-    const data = await response.json(); if (!response.ok) throw new Error(data.error);
-    activeReview = data.review; clearInterval(replyTimer);
-    await continueAfterApproval(data.review);
-    $('#review-status-text').textContent = 'Review approved · this is the version you approved. Original comment threads remain saved.';
-    $('#reply-connection').textContent = 'Approval saved locally. It does not merge or commit changes.';
-    render(); toast('Review approved');
+    const response = await fetch('/api/commits/' + current.commit.sha + '/approve', {method:'POST', headers:{'X-Trace-Token':current.token}});
+    if (!response.ok) throw Error((await response.json()).error);
+    current.commit.approved = true;
   } catch (error) { toast(error.message); }
-  finally { $('#approve-final').disabled = false; }
+  finally { completionButtons(); }
+};
+function openFollowup(id) {
+  if (!activeReview) return;
+  replyTarget = {reviewId: activeReview.id, commentId:id};
+  const anchor = activeReview.comments.find(c => c.id === id);
+  $('#followup-context').textContent = anchor ? anchor.path + ':' + anchor.line + ' · ' + anchor.body : activeReview.instruction;
+  $('#reply-error').textContent = '';
+  $('#followup textarea').value = review().drafts['reply:' + id] || '';
+  $('#followup').showModal();
+  $('#followup textarea').focus();
 }
-$('#verify-latest').onclick = verifyLatest;
-$('#back-to-threads').onclick = loadSession;
-$('#approve-top').onclick = approveReview;
-$('#approve-end').onclick = approveReview;
-$('#approve-final').onclick = approveReview;
+$('#general-followup').onclick = () => openFollowup('review');
+$('#followup-close').onclick = () => $('#followup').close();
+$('#followup textarea').oninput = e => { review().drafts['reply:' + replyTarget.commentId] = e.target.value; persist(); };
+$('#followup form').onsubmit = async e => {
+  e.preventDefault();
+  const message = $('#followup textarea').value.trim();
+  if (!message || sendingReview) return;
+  const anchor = activeReview.comments.find(c => c.id === replyTarget.commentId);
+  const payload = {...packet(), replyTo: replyTarget, instruction: anchor ? '' : message,
+    comments: anchor ? [{...anchor, id: crypto.randomUUID(), body:message}] : []};
+  const scope = scopeOf();
+  sendingReview = true;
+  try {
+    const response = await fetch('/api/reviews?scope=' + encodeURIComponent(scope), {method:'POST',
+      headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload)});
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error);
+    delete review().drafts['reply:' + replyTarget.commentId]; persist();
+    $('#followup').close();
+    const params = new URLSearchParams({scope,round:data.id});
+    setLocation(params);
+    await loadSession(params);
+  } catch (error) { $('#reply-error').textContent = error.message; }
+  finally { sendingReview = false; render(); }
+};
 
 const usagesDialog=document.createElement('section');
 usagesDialog.hidden=true;usagesDialog.setAttribute('aria-label','Find Usages in diff');
@@ -516,25 +613,6 @@ document.addEventListener('keydown',e=>{if(e.altKey&&e.key==='F7'){if(e.target.m
 function closeDiffUsages(){usageSelection=null;applyUsageHighlights();usagesDialog.hidden=true;document.body.classList.remove('usages-open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!usagesDialog.hidden){closeDiffUsages();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('.diff-symbol')){e.preventDefault();openDiffUsages(e.target);}});
 
-async function continueAfterApproval(approval){
- if(continuingApproval)return;
- continuingApproval=true;
- try{
-   const response=await fetch(`/api/reviews/${approval.id}/continue`,{method:'POST',headers:{'X-Trace-Token':session.token,Origin:location.origin}});
-   const data=await response.json();if(!response.ok)throw new Error(data.error);
-   const done=[...review().done];
-   session=data;submitted=false;activeReview=null;clearInterval(replyTimer);
-   state.reviews[key()]={comments:[],drafts:{},instruction:'',done};persist();
-   $('#instruction').disabled=false;$('#refresh').hidden=false;
-   $('#review-status').hidden=false;
-   $('#review-status-text').textContent='✓ Approval saved. You can add more feedback and send another review.';
-   $('#reply-connection').textContent='Previous review and agent replies remain saved in review history.';
-   $('#general-thread').hidden=true;
-   render();
- }catch(error){toast('Approval saved. Could not continue: '+error.message);}
- finally{continuingApproval=false;}
-}
-
 const toolbarObserver=new ResizeObserver(entries=>{for(const entry of entries)document.documentElement.style.setProperty('--review-toolbar-height',entry.target.getBoundingClientRect().height+'px');});
 toolbarObserver.observe(document.querySelector('main>.toolbar'));
 
@@ -553,9 +631,12 @@ function applyUsageHighlights(){
  }
 }
 
+function navigableComments() {
+  return [...review().comments, ...(submitted ? [] : session?.previousRound?.comments || [])];
+}
 function orderedComments(){
  const order=new Map(fileTreeOrder(files()).map((f,i)=>[f.path,i]));
- return [...review().comments].sort((a,b)=>(order.get(a.path)??Infinity)-(order.get(b.path)??Infinity)||a.index-b.index);
+ return navigableComments().sort((a,b)=>(order.get(a.path)??Infinity)-(order.get(b.path)??Infinity)||a.index-b.index);
 }
 function updateCommentNavigation(){
  const comments=orderedComments(),index=comments.findIndex(c=>c.id===activeCommentId),noun=comments.length===1?'comment':'comments';
@@ -565,7 +646,7 @@ function updateCommentNavigation(){
 function renderCommentList() {
  const comments = orderedComments();
  $('#comment-links').innerHTML = comments.map(comment => {
-   const count = (activeReview?.replies || []).filter(reply => reply.commentId === comment.id).length;
+   const count = (activeReview?.replies || session?.previousRound?.replies || []).filter(reply => reply.commentId === comment.id).length;
    const status = count ? ` · ${count} ${count === 1 ? 'reply' : 'replies'}` : commentPending(comment.id) ? ' · Awaiting reply' : '';
    return `<button data-thread-link="${esc(comment.id)}"><small>${esc(comment.path)}:${comment.line}${status}</small><span>${esc(comment.body)}</span></button>`;
  }).join('');
@@ -577,10 +658,9 @@ $('#comment-links').onclick = event => {
 };
 async function showComment(id) {
  $('#comment-menu').hidePopover();
- if (session.verifying && session.revision !== activeReview?.revision) {
-   await loadSession();
-   if (session.verifying) return;
+ if (!submitted && session.previousRound?.comments.some(comment => comment.id === id)) {
    state.mode = 'files';
+   await navigate(scopeOf(), {round:session.previousRound.id});
  }
  const target = review().comments.find(comment => comment.id === id);
  if (!target) return;

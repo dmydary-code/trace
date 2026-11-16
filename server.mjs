@@ -71,6 +71,7 @@ export async function createTraceServer(options = {}) {
       }
     }
     if (data.commit) data.commit = {...data.commit, approved: await timeline.isApproved(data.commit.sha)};
+    if (compose && !id && ids.length) data.previousRound = await readReview(repository.gitDir, ids.at(-1));
     return {...data, scope, rounds: ids, token, sessionId, viewerHeartbeatMs,
       handoff: options.wait && (options.listen || !submitted) ? 'waiting-agent' : 'inbox', agent: options.agent || null};
   }
@@ -209,7 +210,7 @@ export async function createTraceServer(options = {}) {
           }
           const prompt = outcome === 'changes_requested' ? reviewPrompt(review) + (instruction ? '\n\nAdditional instructions:\n' + instruction : '') : outcome === 'approved' ? 'The user finished this review without requesting changes. This does not authorize committing, merging, or publishing.' : 'The user cancelled this review. Do not infer approval.';
           const result = {...review, prompt, reviewPath: join(dir, 'review.json')};
-          const {token: ignoredToken, sessionId: ignoredSession, handoff: ignoredHandoff, agent: ignoredAgent, submittedReview: ignoredReview, rounds: ignoredRounds, ...savedSnapshot} = current;
+          const {token: ignoredToken, sessionId: ignoredSession, handoff: ignoredHandoff, agent: ignoredAgent, submittedReview: ignoredReview, previousRound: ignoredPrevious, rounds: ignoredRounds, ...savedSnapshot} = current;
           savedSnapshot.repositoryOptions = {base: rangeOptions.base || 'HEAD', frozenRef: repository.baseRevision, staged: !!rangeOptions.staged, mergeBase: !!rangeOptions.mergeBase};
           await saveReview(repository.gitDir, result, savedSnapshot);
           submitted = true; submittedId = id;
