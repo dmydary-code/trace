@@ -73,14 +73,15 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
 .scope-nav [aria-pressed="true"], .commit-mark {color:var(--accent);border-color:currentColor}
 #commit-body,.previous-message p,#followup-context {white-space:pre-wrap;overflow-wrap:anywhere}
 #round-picker {margin-inline-start:.75rem}
-#review-rail {display:contents}
-.commit-browsing .workspace {grid-template-columns:clamp(230px,var(--sidebar-width,266px),min(38vw,640px)) minmax(0,1fr)}
-.commit-browsing #review-rail {position:sticky;top:var(--header-height,67px);height:calc(100dvh - var(--header-height,67px));display:flex;flex-direction:column;min-width:0;background:var(--panel);border-right:1px solid var(--line)}
-.commit-browsing #file-sidebar {position:relative;top:auto;height:auto;flex:1;min-height:0;border-right:0}
+/* Keep the selected commit and its neighbors in reach while reading a long diff. */
+.commit-browsing {--timeline-width:clamp(210px,20vw,300px)}
+.commit-browsing .workspace {display:grid;grid-template-columns:var(--sidebar-width,266px) minmax(0,1fr) var(--timeline-width)}
 .commit-browsing.sidebar-collapsed #file-sidebar {display:none}
-#timeline {display:flex;flex-direction:column;min-height:0;max-height:60%;border-bottom:1px solid var(--line)}
-#timeline[hidden] {display:none}
-.sidebar-collapsed #timeline {max-height:100%}
+.commit-browsing main {grid-column:2}
+#timeline {grid-column:-2 / -1;grid-row:1;position:sticky;top:var(--header-height,67px);align-self:start;display:flex;flex-direction:column;height:calc(100dvh - var(--header-height,67px));min-width:0;background:var(--panel);border-left:1px solid var(--line)}
+#timeline[hidden], #close-file-sidebar {display:none}
+.commit-browsing #diff-usages {right:var(--timeline-width);width:min(440px,calc(100% - var(--timeline-width)))}
+.commit-browsing.usages-open main {margin-right:0}
 .timeline-head {display:flex;align-items:center;gap:.55rem;padding:20px 15px 0}
 .timeline-head h2 {margin:0;font-size:15px;font-weight:650}
 #timeline-count {font:12px ui-monospace,monospace;color:var(--muted)}
@@ -102,35 +103,38 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
 .commit-meta {display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:4px;color:var(--muted);font-size:11px}
 .commit-meta code {font-size:11px}
 .commit-mark {color:var(--accent)}
-@media(min-width:540px) and (max-width:760px) {
-  .commit-browsing .workspace {display:grid;grid-template-columns:minmax(155px,31%) minmax(0,1fr)}
+@media(max-width:1000px) {
+  .commit-browsing {--timeline-width:clamp(114px,27vw,218px)}
+  .commit-browsing .workspace {grid-template-columns:minmax(0,1fr) var(--timeline-width)}
+  .commit-browsing main {grid-column:1;grid-row:1}
+  .commit-browsing #file-sidebar {display:none}
+  .commit-browsing.commit-files-open #file-sidebar {display:flex;position:fixed;inset:var(--header-height,67px) auto 0 0;z-index:15;width:min(280px,calc(100% - var(--timeline-width)));height:auto;min-width:0;padding:14px;border-right:1px solid var(--line);box-shadow:4px 0 16px var(--shadow);overflow:auto}
+  .commit-browsing #close-file-sidebar {display:block;margin-left:auto;padding:2px 8px;font:18px/1.2 sans-serif}
+  .commit-browsing .sidebar-title {justify-content:flex-start;gap:6px}
+  .commit-browsing #sidebar-resizer {display:none}
+}
+@media(max-width:760px) {
   .commit-browsing main {padding:16px 12px 40px}
   .commit-browsing .scope-nav {gap:4px;margin-bottom:14px}
   .commit-browsing .scope-nav button {padding:6px 8px}
-  .commit-browsing #title {font-size:20px}
+  .commit-browsing #title {font-size:20px;overflow-wrap:anywhere}
   .commit-browsing .toolbar {gap:6px;padding-block:9px}
   .commit-browsing .toolbar button {padding:6px 8px}
-  .commit-browsing #file-sidebar {overflow:auto}
-  .timeline-head {padding:14px 10px 0}
+  .timeline-head {display:grid;grid-template-columns:minmax(0,1fr) auto;padding:14px 10px 0;align-items:baseline;gap:4px}
   #timeline-range {margin-inline:10px}
   #commit-list {padding-inline:4px}
 }
 @media(max-width:539px) {
-  .commit-browsing .workspace {display:block}
-  .commit-browsing #review-rail {display:contents}
-  .commit-browsing #timeline {position:sticky;top:var(--header-height,67px);z-index:8;max-height:min(27dvh,200px);background:var(--panel)}
-  .timeline-head {padding:6px 12px 0}
-  #timeline-range {margin:0 12px 3px}
-  #commit-list {padding-bottom:4px}
-  .commit-browsing #file-sidebar {display:none}
-  .commit-browsing.commit-files-open #file-sidebar {display:flex;height:140px;min-width:0;width:auto;padding:8px 12px;overflow:auto}
-  .commit-browsing .scope-nav {margin-bottom:10px}
-  .commit-browsing #title {margin-block:5px;font-size:20px}
-  .commit-browsing .toolbar {padding-block:6px;gap:6px}
-  .commit-browsing .thread {scroll-margin-top:calc(100px + var(--timeline-height,0px) + var(--review-toolbar-height,90px))}
-  .commit-browsing main>.toolbar {top:calc(var(--header-height,67px) + var(--timeline-height,0px));z-index:7}
-  .commit-browsing .file-header {top:calc(var(--header-height,67px) + var(--timeline-height,0px) + var(--review-toolbar-height,90px))}
-  .commit-browsing .graph-detail .file-header {top:44px}
+  .commit-browsing main {padding-inline:8px}
+  .commit-browsing .scope-nav button {font-size:11px;padding-inline:5px}
+  .timeline-head {padding:12px 6px 0}
+  .commit-browsing .line {grid-template-columns:20px 24px 24px 15px 1fr}
+  .timeline-head h2 {font-size:13px}
+  #timeline-range {margin:4px 6px 8px;font-size:10px}
+  #commit-list {padding-inline:0 3px}
+  #commit-list li {padding-left:13px}
+  #commit-list a {padding-inline:4px}
+  .commit-subject {font-size:12px}
 }
 .previous-message {padding:.5rem .75rem;border-inline-start:2px solid var(--line);margin-block:.5rem}
 #followup textarea {min-height:6rem;width:100%}

@@ -24,13 +24,30 @@ const key = () => session ? `${session.repositoryId}:${scopeOf()}:${session.subm
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
 const files = () => session?.files || [];
 function persist() { try { localStorage.setItem('trace-v3', JSON.stringify(state)); } catch { toast('Could not save locally. Copy your review before leaving.'); } }
-function sidebarWidth(value) { return Math.max(180, Math.min(Number(value) || 266, 640, window.innerWidth - 320)); }
+const compactCommits = matchMedia('(max-width:1000px)');
+function fileDrawerMode() { return !$('#timeline').hidden && compactCommits.matches; }
+function setFileDrawer(open, restoreFocus = false) {
+  document.body.classList.toggle('commit-files-open', open);
+  syncFileToggle();
+  if (open) $('#search').focus({preventScroll:true});
+  else if (restoreFocus) $('#toggle-sidebar').focus({preventScroll:true});
+}
+function syncFileToggle() {
+  const expanded = fileDrawerMode() ? document.body.classList.contains('commit-files-open') : !state.sidebarCollapsed;
+  $('#toggle-sidebar').setAttribute('aria-expanded', String(expanded));
+}
+function maxSidebarWidth() {
+  const timelineWidth = $('#timeline').getBoundingClientRect().width;
+  return Math.max(180, Math.min(640, window.innerWidth - timelineWidth - 320));
+}
+function sidebarWidth(value) { return Math.max(180, Math.min(Number(value) || 266, maxSidebarWidth())); }
 function applySidebarWidth() {
  const width = state.sidebarCollapsed ? 0 : sidebarWidth(state.sidebarWidth);
  document.body.classList.toggle('sidebar-collapsed', !!state.sidebarCollapsed);
  document.documentElement.style.setProperty('--sidebar-width', width + 'px');
  $('#sidebar-resizer').setAttribute('aria-valuenow', Math.round(width));
- $('#sidebar-resizer').setAttribute('aria-valuemax', Math.max(180, Math.min(640, window.innerWidth - 320)));
+ $('#sidebar-resizer').setAttribute('aria-valuemax', maxSidebarWidth());
+ syncFileToggle();
 }
 const resizer = $('#sidebar-resizer');
 resizer.onpointerdown = event => {
@@ -163,7 +180,7 @@ function jump(id) { if(state.mode === 'graph') { const f=files().find(f=>f.id===
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.followup) openFollowup(b.dataset.followup);
-  if (b.dataset.file) jump(b.dataset.file);
+  if (b.dataset.file) { if (document.body.classList.contains('commit-files-open')) setFileDrawer(false, true); jump(b.dataset.file); }
   if (b.dataset.comment) { const f = files().find(f => f.id === b.dataset.comment); editor = lineKey(f.path, +b.dataset.index); editId = null; renderFeed(); $('#comment-body').focus(); }
   if (b.hasAttribute('data-cancel')) { editor = null; editId = null; renderFeed(); }
   if (b.dataset.resolve) { const c = review().comments.find(c => c.id === b.dataset.resolve); c.resolved = !c.resolved; persist(); renderFeed(); counts(); }
@@ -185,13 +202,18 @@ $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); rend
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
 $('#reset-viewed').onclick=()=>{review().done=[];persist();render();toast('Viewed marks cleared');};
 $('#toggle-sidebar').onclick = () => {
-  if (!$('#timeline').hidden && matchMedia('(max-width:539px)').matches) {
-    if (document.body.classList.toggle('commit-files-open')) $('#file-sidebar').scrollIntoView({block:'center'});
-    return;
-  }
+  if (fileDrawerMode()) { setFileDrawer(!document.body.classList.contains('commit-files-open')); return; }
   state.sidebarCollapsed = !state.sidebarCollapsed;
   persist(); render();
 };
+$('#close-file-sidebar').onclick = () => setFileDrawer(false, true);
+compactCommits.addEventListener('change', () => setFileDrawer(false));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('commit-files-open')) setFileDrawer(false, true);
+});
+document.addEventListener('click', e => {
+  if (document.body.classList.contains('commit-files-open') && !e.target.closest('#file-sidebar, #toggle-sidebar')) setFileDrawer(false);
+});
 function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, commit: session.commit, previousId: session.rounds?.at(-1) || null, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
@@ -545,6 +567,7 @@ function hideTimeline() {
   $('#timeline').hidden = true;
   $('#commit-list').replaceChildren();
   document.body.classList.remove('commit-browsing', 'commit-files-open');
+  applySidebarWidth();
   completionButtons();
 }
 function highlightCommit(sha) {
@@ -555,10 +578,17 @@ function highlightCommit(sha) {
   current?.removeAttribute('aria-current');
   if (!next) return;
   next.setAttribute('aria-current', 'page');
-  const row = next.getBoundingClientRect(), viewport = list.getBoundingClientRect();
+  keepCommitInView(list, next);
+}
+function keepCommitInView(list, link) {
+  const row = link.getBoundingClientRect(), viewport = list.getBoundingClientRect();
   if (row.top < viewport.top) list.scrollTop += row.top - viewport.top;
   else if (row.bottom > viewport.bottom) list.scrollTop += row.bottom - viewport.bottom;
 }
+new ResizeObserver(([{target:list}]) => {
+  const selected = list.querySelector('[aria-current]');
+  if (selected) keepCommitInView(list, selected);
+}).observe($('#commit-list'));
 function timelineRow(commit) {
   const sha = esc(commit.sha);
   return `<li><a href="?scope=${sha}" data-sha="${sha}" title="${sha} · ${esc(commit.author)} · ${esc(new Date(commit.date).toLocaleDateString())}">
@@ -571,6 +601,7 @@ async function openTimeline(selectCommit) {
   const panel = $('#timeline'), list = $('#commit-list');
   panel.hidden = false;
   document.body.classList.add('commit-browsing');
+  applySidebarWidth();
   completionButtons();
   $('#timeline-range').textContent = 'Loading commits…';
   $('#timeline-count').textContent = '';
@@ -606,9 +637,6 @@ $('#commit-list').onclick = event => {
   event.preventDefault();
   if (scopeOf() !== link.dataset.sha || diffLoading) navigate(link.dataset.sha);
 };
-new ResizeObserver(([entry]) => {
-  document.documentElement.style.setProperty('--timeline-height', entry.target.getBoundingClientRect().height + 'px');
-}).observe($('#timeline'));
 $('#commit-approve').onclick = async () => {
   const current = session;
   $('#commit-approve').disabled = true;

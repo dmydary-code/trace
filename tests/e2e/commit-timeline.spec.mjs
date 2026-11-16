@@ -3,6 +3,15 @@ import {eventually} from '../support/harness.mjs';
 import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
+async function expectTimelineOnRight(page) {
+  const detail = await page.locator('main').boundingBox();
+  const rail = await page.locator('#timeline').boundingBox();
+  expect(rail.x).toBeCloseTo(detail.x + detail.width, 0);
+  expect(rail.y).toBeCloseTo((await page.locator('header').boundingBox()).height, 0);
+  expect(rail.x + rail.width).toBeLessThanOrEqual(page.viewportSize().width + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+}
+
 test('approve one commit, discuss another twice, return to Overall', async ({page, f}) => {
   await f.git('checkout', '-b', 'shipping');
   await f.git('commit', '-am', 'Include shipping');
@@ -18,6 +27,12 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   const rows = page.locator('#commit-list a');
   await expect(rows).toHaveCount(2);
   await expect(page.locator('#title')).toHaveText('Include shipping');
+  await expectTimelineOnRight(page);
+  const files = await page.locator('#file-sidebar').boundingBox();
+  expect(files.x + files.width).toBeCloseTo((await page.locator('main').boundingBox()).x, 0);
+  await page.getByRole('button', {name:'Toggle file sidebar'}).click();
+  await expect(page.locator('#file-sidebar')).toBeHidden();
+  await expectTimelineOnRight(page);
   await page.locator('#commit-approve').click();
   await expect(page.locator('#commit-approve')).toBeDisabled();
   await expect(rows.first()).toHaveAttribute('aria-current', 'page');
@@ -50,6 +65,7 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   await expect(page.locator('.thread-history')).toContainText('billing account');
   await page.locator('#overall-scope').click();
   await expect(page.locator('#title')).toHaveText('Overall changes');
+  await expect(page.locator('#timeline')).toBeHidden();
   await expect(page.locator('#feed')).toContainText('USD');
   await expect(page.locator('#feed')).toContainText(f.project.path);
   await expect(page.locator('#commit-approve')).toBeHidden();
@@ -76,6 +92,7 @@ test('a deep-linked timeline keeps its place when reading adjacent commits on a 
   const link = step => list.getByRole('link', {name:new RegExp('^Step ' + step + ' ')});
   await expect(link(16)).toBeInViewport();
   await expect(link(16)).toHaveAttribute('aria-current', 'page');
+  await expectTimelineOnRight(page);
   const offset = await list.evaluate(el => el.scrollTop);
   expect(offset).toBeGreaterThan(0);
   await link(15).click();
@@ -88,9 +105,15 @@ test('a deep-linked timeline keeps its place when reading adjacent commits on a 
   await expect(link(16)).toBeInViewport();
   await expect(page.locator('#title')).toHaveText('Step 16');
   await page.setViewportSize({width:581, height:780});
-  const timeline = await page.locator('#timeline').boundingBox();
-  const detail = await page.locator('main').boundingBox();
-  expect(timeline.x + timeline.width).toBeLessThanOrEqual(detail.x + 1);
+  await expectTimelineOnRight(page);
+  const toggle = page.getByRole('button', {name:'Toggle file sidebar'});
+  await toggle.click();
+  await expect(page.getByRole('searchbox')).toBeFocused();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(link(16)).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#file-sidebar')).toBeHidden();
+  await expect(toggle).toBeFocused();
   await link(15).click();
   await expect(page.locator('#title')).toHaveText('Step 15');
   await expect(link(16)).toBeInViewport();
