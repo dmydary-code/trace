@@ -8,7 +8,8 @@ const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let loadGeneration = 0;
-let timelineRequest = 0;
+let timelineRequest = 0, viewMarkVersion = 0;
+const pendingViewMarks = new Map();
 let lastCommit = null;
 const isCommitScope = scope => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(scope || '');
 let viewParams = new URLSearchParams(location.search);
@@ -281,6 +282,7 @@ async function loadSession(params = viewParams) {
   diffLoading=true;graphError=null;
   $('#review').disabled = true;
   $('#commit-approve').disabled = true;
+  $('#commit-viewed').disabled = true;
   renderFeed();
   try {
     const res = await fetch(requestUrl('/api/session', params)); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
@@ -521,6 +523,10 @@ function completionButtons() {
   const commit = session?.commit;
   const browsing = !$('#timeline').hidden;
   $('#timeline-open').setAttribute('aria-pressed', String(browsing));
+  $('#commit-view-label').hidden = !commit;
+  const check = commit && rowViewCheckbox(commit.sha);
+  $('#commit-viewed').checked = !!check?.checked;
+  $('#commit-viewed').disabled = diffLoading || !check || check.disabled;
   $('#commit-approve').hidden = !commit;
   $('#commit-approve').disabled = !commit || diffLoading || commit.approved;
   $('#commit-approve').textContent = commit?.approved ? 'Approved ✓' : 'Approve commit';
@@ -591,13 +597,15 @@ new ResizeObserver(([{target:list}]) => {
 }).observe($('#commit-list'));
 function timelineRow(commit) {
   const sha = esc(commit.sha);
-  return `<li><a href="?scope=${sha}" data-sha="${sha}" title="${sha} · ${esc(commit.author)} · ${esc(new Date(commit.date).toLocaleDateString())}">
+  const pending = pendingViewMarks.get(commit.sha);
+  const label = esc('Viewed: ' + (commit.subject || '(no subject)') + ' (' + commit.sha.slice(0, 8) + ')');
+  return `<li><label class="timeline-view" title="${label}"><input type="checkbox" data-view-commit="${sha}" aria-label="${label}" ${(pending ?? commit.viewed) ? 'checked' : ''} ${pending !== undefined ? 'disabled' : ''}></label><a href="?scope=${sha}" data-sha="${sha}" title="${sha} · ${esc(commit.author)} · ${esc(new Date(commit.date).toLocaleDateString())}">
     <span class="commit-subject">${esc(commit.subject || '(no subject)')}</span>
-    <span class="commit-meta"><code>${sha.slice(0, 8)}</code><span class="commit-mark" ${commit.approved ? '' : 'hidden'}>✓ Approved</span></span>
+    <span class="commit-meta"><code>${sha.slice(0, 8)}</code><span class="commit-mark" ${commit.approved ? '' : 'hidden'}>Approved</span></span>
   </a></li>`;
 }
 async function openTimeline(selectCommit) {
-  const id = ++timelineRequest;
+  const id = ++timelineRequest, markVersion = viewMarkVersion;
   const panel = $('#timeline'), list = $('#commit-list');
   panel.hidden = false;
   document.body.classList.add('commit-browsing');
@@ -610,7 +618,9 @@ async function openTimeline(selectCommit) {
     const data = await response.json();
     if (id !== timelineRequest) return;
     if (!response.ok) throw Error(data.error);
+    if (markVersion !== viewMarkVersion) return openTimeline(selectCommit);
     list.innerHTML = data.commits.map(timelineRow).join('');
+    completionButtons();
     $('#timeline-count').textContent = String(data.commits.length);
     $('#timeline-range').textContent = data.commits.length ? `Since ${data.label} · oldest first` : 'No commits in this range.';
     if (!data.commits.length) return;
@@ -637,6 +647,41 @@ $('#commit-list').onclick = event => {
   event.preventDefault();
   if (scopeOf() !== link.dataset.sha || diffLoading) navigate(link.dataset.sha);
 };
+function rowViewCheckbox(sha) {
+  return $('#commit-list input[data-view-commit="' + CSS.escape(sha) + '"]');
+}
+function showViewMark(sha, viewed) {
+  const check = rowViewCheckbox(sha);
+  if (check) {
+    check.checked = viewed;
+    check.disabled = pendingViewMarks.has(sha);
+  }
+  completionButtons();
+}
+async function setCommitViewed(sha, viewed) {
+  if (!session) { showViewMark(sha, !viewed); return; }
+  if (pendingViewMarks.has(sha)) return;
+  pendingViewMarks.set(sha, viewed);
+  showViewMark(sha, viewed);
+  let saved = false;
+  try {
+    const response = await fetch('/api/commits/' + sha + '/viewed', {
+      method:'POST', headers:{'X-Trace-Token':session.token, 'Content-Type':'application/json'}, body:JSON.stringify({viewed})
+    });
+    if (!response.ok) throw Error('Could not save viewed mark. Try again.');
+    saved = true;
+  } catch (error) { toast(error.message); }
+  finally {
+    pendingViewMarks.delete(sha);
+    ++viewMarkVersion;
+    showViewMark(sha, saved ? viewed : !viewed);
+  }
+}
+$('#commit-list').onchange = event => {
+  const check = event.target.closest('input[data-view-commit]');
+  if (check) setCommitViewed(check.dataset.viewCommit, check.checked);
+};
+$('#commit-viewed').onchange = event => setCommitViewed(session.commit.sha, event.target.checked);
 $('#commit-approve').onclick = async () => {
   const current = session;
   $('#commit-approve').disabled = true;

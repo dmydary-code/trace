@@ -32,6 +32,28 @@ test('unborn timeline, root commit, immutable approval across viewers and amend'
   assert.equal((await post(reopened, await session(reopened), endpoint)).status, 400);
 });
 
+test('viewed progress can be set and cleared across viewers independently of approval', async t => {
+  const f = await fixture('javascript', {changed:false});
+  t.after(() => f.dispose());
+  const app = await f.server();
+  const sha = await f.git('rev-parse', 'HEAD');
+  const path = '/api/commits/' + sha + '/viewed';
+  const s = await get(app, '/api/session?scope=' + sha);
+  assert.equal(s.commit.viewed, false);
+  assert.equal((await post(app, s, path, {viewed:true}, {Origin:'https://example.invalid'})).status, 403);
+  assert.equal((await post(app, s, path, {viewed:'true'})).status, 400);
+  assert.equal((await post(app, s, path, {viewed:true})).status, 200);
+  const reopened = await f.server();
+  const snapshot = await get(reopened, '/api/session?scope=' + sha);
+  assert.equal(snapshot.commit.viewed, true);
+  assert.equal(snapshot.commit.approved, false);
+  assert.equal((await post(reopened, snapshot, path, {viewed:false})).status, 200);
+  assert.equal((await post(reopened, snapshot, path, {viewed:false})).status, 200);
+  assert.equal((await get(app, '/api/timeline')).commits[0].viewed, false);
+  await f.git('commit', '--amend', '-m', 'Rewrite subject');
+  assert.equal((await post(app, s, path, {viewed:true})).status, 400);
+});
+
 test('historical graph and general messages keep the reviewed tree and exact commit', async t => {
   const f = await fixture('javascript', {changed:false});
   t.after(() => f.dispose());

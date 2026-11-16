@@ -37,7 +37,7 @@ For automation, `--wait --json` prints newline-delimited events: `ready` with th
 
 **Working tree** opens the original CLI comparison. **Commits** lists first-parent commits oldest first. An explicit base defines the range. Otherwise Trace uses the common ancestor with the remote default branch (or local main/master) on feature branches. On the default branch it starts with up to 20 recent commits. The starting boundary stays fixed in this viewer. The initial commit compares against the empty tree and merge commits compare against their first parent. **Overall** compares the range baseline with the current working tree, or the index for staged reviews.
 
-**Approve commit** saves a local mark for the full SHA in this worktree’s Git metadata. Sending a message and approving a commit are independent. Use the Messages selector to reopen earlier rounds, or Reply to continue at the original anchor. Existing saved reviews remain readable.
+**Viewed** marks a commit as read. Toggle the checkbox in the diff or directly in the timeline without leaving the current commit. The mark persists per full SHA in this worktree and can be cleared. **Approve commit** saves a separate approval for that SHA. Sending a message and approving a commit are independent. Use the Messages selector to reopen earlier rounds, or Reply to continue at the original anchor. Existing saved reviews remain readable.
 
 ### Optional separate agent
 

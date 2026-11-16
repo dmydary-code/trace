@@ -77,6 +77,46 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   expect(await run.exited).toBe(0);
 });
 
+test('viewed checkboxes track reading across reloads without approving or switching commits', async ({page, f}) => {
+  await f.git('checkout', '-b', 'reading');
+  await f.git('commit', '-am', 'First change');
+  await f.put('next.txt', 'second\n');
+  await f.git('add', 'next.txt');
+  await f.git('commit', '-m', 'Second change');
+  const app = await f.server({base:'main'});
+  await page.goto(app.url);
+  await page.getByRole('button', {name:'Commits', exact:true}).click();
+  const panel = page.getByRole('navigation', {name:'Commit timeline'});
+  const first = panel.getByRole('checkbox', {name:/First change/});
+  const second = panel.getByRole('checkbox', {name:/Second change/});
+  const detail = page.getByRole('checkbox', {name:'Commit viewed', exact:true});
+  await expect(page.locator('#title')).toHaveText('First change');
+  await detail.check();
+  await expect(first).toBeChecked();
+  await expect(first).toBeEnabled();
+  await expect(page.locator('#commit-approve')).toBeEnabled();
+  await second.check();
+  await expect(second).toBeEnabled();
+  await expect(page.locator('#title')).toHaveText('First change');
+  await page.reload();
+  await expect(first).toBeChecked();
+  await expect(second).toBeChecked();
+  await expect(detail).toBeChecked();
+  await panel.getByRole('link', {name:/Second change/}).click();
+  await expect(page.locator('#title')).toHaveText('Second change');
+  await second.uncheck();
+  await expect(detail).not.toBeChecked();
+  await expect(detail).toBeEnabled();
+  await page.reload();
+  await expect(first).toBeChecked();
+  await expect(second).not.toBeChecked();
+  await expect(detail).not.toBeChecked();
+  await page.route('**/api/commits/*/viewed', route => route.fulfill({status:400, json:{error:'Unavailable'}}));
+  await first.click();
+  await expect(page.locator('#toast')).toContainText('Could not save');
+  await expect(first).toBeChecked();
+});
+
 test('a deep-linked timeline keeps its place when reading adjacent commits on a narrow screen', async ({page, f}) => {
   await f.git('checkout', '-b', 'steps');
   for (let step = 1; step <= 16; step++) {

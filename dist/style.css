@@ -88,16 +88,18 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
 #timeline-range {margin:3px 15px 10px;overflow-wrap:anywhere}
 #commit-list {margin:0;padding:0 9px 10px;overflow:auto;overscroll-behavior:contain;list-style:none}
 #commit-list:empty {padding:0}
-#commit-list li {position:relative;padding:0 0 2px 19px}
-#commit-list li::before {content:"";position:absolute;left:7px;top:0;bottom:0;width:1px;background:var(--line)}
+#commit-list li {position:relative;padding:0 0 2px 24px}
+#commit-list li::before {content:"";position:absolute;left:11px;top:0;bottom:0;width:1px;background:var(--line)}
 #commit-list li:first-child::before {top:17px}
 #commit-list li:last-child::before {bottom:auto;height:17px}
 #commit-list li:only-child::before {display:none}
 #commit-list a {display:block;padding:8px 9px;border-radius:6px;color:var(--text);text-decoration:none}
-#commit-list a::before {content:"";position:absolute;left:4px;top:13px;width:7px;height:7px;box-sizing:border-box;border:1px solid var(--muted);border-radius:50%;background:var(--panel)}
+#commit-view-label:not([hidden]) {display:inline-flex;gap:6px;align-items:center;cursor:pointer;margin-inline-start:.5rem}
+#commit-viewed, .timeline-view input {accent-color:var(--accent);cursor:pointer;margin:0}
+.timeline-view {position:absolute;left:0;top:4px;width:24px;height:26px;display:grid;place-items:center;cursor:pointer}
+.timeline-view input {width:14px;height:14px}
 #commit-list a:hover {background:var(--raised)}
 #commit-list a[aria-current="page"] {background:var(--selected)}
-#commit-list a[aria-current="page"]::before {background:var(--accent);border-color:var(--accent)}
 #commit-list a:focus-visible {outline-offset:-2px}
 .commit-subject {display:block;font-size:13px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
 .commit-meta {display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:4px;color:var(--muted);font-size:11px}
@@ -132,7 +134,7 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
   .timeline-head h2 {font-size:13px}
   #timeline-range {margin:4px 6px 8px;font-size:10px}
   #commit-list {padding-inline:0 3px}
-  #commit-list li {padding-left:13px}
+  #commit-list li {padding-left:22px}
   #commit-list a {padding-inline:4px}
   .commit-subject {font-size:12px}
 }

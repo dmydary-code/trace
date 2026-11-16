@@ -70,7 +70,10 @@ export async function createTraceServer(options = {}) {
         data = {...await currentSnapshot({from: commit.parent, to: commit.sha, label: commit.parent.slice(0, 8)}), commit};
       }
     }
-    if (data.commit) data.commit = {...data.commit, approved: await timeline.isApproved(data.commit.sha)};
+    if (id && data.commit) {
+      const [approved, viewed] = await Promise.all([timeline.isApproved(data.commit.sha), timeline.isViewed(data.commit.sha)]);
+      data.commit = {...data.commit, approved, viewed};
+    }
     if (compose && !id && ids.length) data.previousRound = await readReview(repository.gitDir, ids.at(-1));
     return {...data, scope, rounds: ids, token, sessionId, viewerHeartbeatMs,
       handoff: options.wait && (options.listen || !submitted) ? 'waiting-agent' : 'inbox', agent: options.agent || null};
@@ -97,9 +100,14 @@ export async function createTraceServer(options = {}) {
       const scope = url.searchParams.get('scope');
       if (scope !== null && scope !== 'changes' && scope !== 'overall' && !isCommitId(scope)) return json(res, 400, {error: 'Invalid comparison'});
       if (req.method === 'GET' && url.pathname === '/api/timeline') return json(res, 200, await timeline.list());
-      const mark = url.pathname.match(/^\/api\/commits\/([0-9a-f]+)\/approve$/);
+      const mark = url.pathname.match(/^\/api\/commits\/([0-9a-f]+)\/(approve|viewed)$/);
       if (mark && req.method === 'POST') {
         if (req.headers['x-trace-token'] !== token || req.headers.origin !== origin) return json(res, 403, {error: 'Open the review on the local server'});
+        if (mark[2] === 'viewed') {
+          const {viewed} = await body(req);
+          await timeline.setViewed(mark[1], viewed);
+          return json(res, 200, {sha: mark[1], viewed});
+        }
         await timeline.approve(mark[1]);
         return json(res, 200, {sha: mark[1], approved: true});
       }
