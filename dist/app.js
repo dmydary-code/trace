@@ -8,6 +8,9 @@ const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let loadGeneration = 0;
+let timelineRequest = 0;
+let lastCommit = null;
+const isCommitScope = scope => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(scope || '');
 let viewParams = new URLSearchParams(location.search);
 let replyTarget = null;
 const scopeOf = () => session?.scope || session?.submittedReview?.scope || 'changes';
@@ -155,7 +158,7 @@ function renderFeed() {
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { updateCommentNavigation(); $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'graph'); $('#route-info').hidden = true; $('#review').disabled = !session || sendingReview; $('#review').setAttribute('aria-busy',String(sendingReview)); $('#review-label').textContent=sendingReview?'Sending…':submitted?'Review sent':'Send to agent'; $('#review-icon').textContent=submitted?'✓':'↗'; tree(); renderFeed(); counts(); completionButtons(); }
+function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', state.mode === 'files'); $('#route-mode').setAttribute('aria-pressed', state.mode === 'graph'); $('#route-info').hidden = true; $('#review').disabled = !session || diffLoading || sendingReview; $('#review').setAttribute('aria-busy',String(sendingReview)); $('#review-label').textContent=sendingReview?'Sending…':submitted?'Review sent':'Send to agent'; $('#review-icon').textContent=submitted?'✓':'↗'; tree(); renderFeed(); counts(); completionButtons(); }
 function jump(id) { if(state.mode === 'graph') { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -181,7 +184,14 @@ $('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : '
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
 $('#reset-viewed').onclick=()=>{review().done=[];persist();render();toast('Viewed marks cleared');};
-$('#toggle-sidebar').onclick = () => { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); render(); };
+$('#toggle-sidebar').onclick = () => {
+  if (!$('#timeline').hidden && matchMedia('(max-width:539px)').matches) {
+    if (document.body.classList.toggle('commit-files-open')) $('#file-sidebar').scrollIntoView({block:'center'});
+    return;
+  }
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  persist(); render();
+};
 function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, commit: session.commit, previousId: session.rounds?.at(-1) || null, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
 function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
 function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
@@ -240,7 +250,16 @@ $('#send').onclick = () => send('changes_requested'); $('#cancel-review').onclic
 async function loadSession(params = viewParams) {
   const generation = ++loadGeneration;
   const previousScope = scopeOf();
-  diffLoading=true;graphError=null;renderFeed();
+  const requested = params.get('scope');
+  if (isCommitScope(requested)) {
+    if ($('#timeline').hidden) openTimeline(false);
+  } else {
+    hideTimeline();
+  }
+  diffLoading=true;graphError=null;
+  $('#review').disabled = true;
+  $('#commit-approve').disabled = true;
+  renderFeed();
   try {
     const res = await fetch(requestUrl('/api/session', params)); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
     const next = await res.json();
@@ -254,6 +273,8 @@ async function loadSession(params = viewParams) {
     let locationInfo=$('#repository-location');if(!locationInfo){locationInfo=document.createElement('p');locationInfo.id='repository-location';locationInfo.className='footnote';$('.intro').append(locationInfo);}
     locationInfo.textContent=`${session.repositoryPath||session.repo} · ${session.comparison} against ${session.base}${session.isWorktree?' · Git worktree':''}`; $('#source-badge').textContent = 'LOCAL'; $('#branch').textContent = `${session.branch} → ${session.base} · ${session.comparison}`; $('#title').textContent = 'Changes in ' + session.repo;
     if (session.commit) {
+      lastCommit = session.commit.sha;
+      highlightCommit(lastCommit);
       $('#title').textContent = session.commit.subject;
       $('#branch').textContent = session.commit.sha.slice(0, 10) + ' · ' + session.commit.author;
     } else if (session.scope === 'overall') $('#title').textContent = 'Overall changes';
@@ -276,7 +297,10 @@ async function loadSession(params = viewParams) {
     acknowledgeViewer();clearInterval(clientHeartbeat);clientHeartbeat=setInterval(acknowledgeViewer,session.viewerHeartbeatMs||5000);
   } catch (err) { if (generation !== loadGeneration) return; diffLoading=false;$('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
 }
-$('#refresh').onclick = () => loadSession();
+$('#refresh').onclick = () => {
+  if (session?.commit && !$('#timeline').hidden) openTimeline(false);
+  loadSession();
+};
 let selectedNode = null, openedNode = null, revealedNodes = new Set(), expandedNodes = new Set(), graphRevision = null, draggedPositions = new Map(), suppressNodeClickUntil = 0, graphScale = 1;
 function selectGraphNode(path) {
   if(performance.now() < suppressNodeClickUntil) return;
@@ -473,13 +497,14 @@ render(); if (local) loadSession();
 
 function completionButtons() {
   const commit = session?.commit;
-  $('#timeline-open').textContent = commit ? '← Commits' : 'Commits';
+  const browsing = !$('#timeline').hidden;
+  $('#timeline-open').setAttribute('aria-pressed', String(browsing));
   $('#commit-approve').hidden = !commit;
-  $('#commit-approve').disabled = !commit || commit.approved;
+  $('#commit-approve').disabled = !commit || diffLoading || commit.approved;
   $('#commit-approve').textContent = commit?.approved ? 'Approved ✓' : 'Approve commit';
   $('#working-scope').textContent = session?.comparison === 'staged' ? 'Staged changes' : 'Working tree';
-  $('#working-scope').setAttribute('aria-pressed', String(scopeOf() === 'changes'));
-  $('#overall-scope').setAttribute('aria-pressed', String(scopeOf() === 'overall'));
+  $('#working-scope').setAttribute('aria-pressed', String(!browsing && scopeOf() === 'changes'));
+  $('#overall-scope').setAttribute('aria-pressed', String(!browsing && scopeOf() === 'overall'));
   const inspectingLatest = viewParams.has('compose') && session?.rounds?.length && !commit;
   $('#verify-latest').hidden = !submitted && !inspectingLatest;
   $('#verify-latest').textContent = commit ? 'New message' : inspectingLatest ? 'Refresh latest changes' : 'Review latest changes';
@@ -514,30 +539,76 @@ $('#verify-latest').onclick = async () => {
 };
 $('#back-to-threads').onclick = () => navigate(scopeOf());
 $('#rounds').onchange = e => navigate(scopeOf(), e.target.value ? {round:e.target.value} : {compose:'1'});
-$('#timeline-close').onclick = () => $('#timeline').close();
-$('#timeline-overall').onclick = () => { $('#timeline').close(); navigate('overall'); };
-$('#timeline-open').onclick = async () => {
-  const dialog = $('#timeline');
-  dialog.showModal();
+function hideTimeline() {
+  if ($('#timeline').hidden) return;
+  ++timelineRequest;
+  $('#timeline').hidden = true;
   $('#commit-list').replaceChildren();
+  document.body.classList.remove('commit-browsing', 'commit-files-open');
+  completionButtons();
+}
+function highlightCommit(sha) {
+  const list = $('#commit-list');
+  const current = list.querySelector('[aria-current]');
+  const next = list.querySelector(`[data-sha="${CSS.escape(sha)}"]`);
+  if (current === next) return;
+  current?.removeAttribute('aria-current');
+  if (!next) return;
+  next.setAttribute('aria-current', 'page');
+  const row = next.getBoundingClientRect(), viewport = list.getBoundingClientRect();
+  if (row.top < viewport.top) list.scrollTop += row.top - viewport.top;
+  else if (row.bottom > viewport.bottom) list.scrollTop += row.bottom - viewport.bottom;
+}
+function timelineRow(commit) {
+  const sha = esc(commit.sha);
+  return `<li><a href="?scope=${sha}" data-sha="${sha}" title="${sha} · ${esc(commit.author)} · ${esc(new Date(commit.date).toLocaleDateString())}">
+    <span class="commit-subject">${esc(commit.subject || '(no subject)')}</span>
+    <span class="commit-meta"><code>${sha.slice(0, 8)}</code><span class="commit-mark" ${commit.approved ? '' : 'hidden'}>✓ Approved</span></span>
+  </a></li>`;
+}
+async function openTimeline(selectCommit) {
+  const id = ++timelineRequest;
+  const panel = $('#timeline'), list = $('#commit-list');
+  panel.hidden = false;
+  document.body.classList.add('commit-browsing');
+  completionButtons();
   $('#timeline-range').textContent = 'Loading commits…';
+  $('#timeline-count').textContent = '';
   try {
     const response = await fetch('/api/timeline');
     const data = await response.json();
+    if (id !== timelineRequest) return;
     if (!response.ok) throw Error(data.error);
+    list.innerHTML = data.commits.map(timelineRow).join('');
+    $('#timeline-count').textContent = String(data.commits.length);
     $('#timeline-range').textContent = data.commits.length ? `Since ${data.label} · oldest first` : 'No commits in this range.';
-    $('#commit-list').innerHTML = data.commits.map(c => `<li><button data-sha="${esc(c.sha)}"><span class="commit-subject">${esc(c.subject || '(no subject)')}</span><small>${esc(c.sha.slice(0, 8))} · ${esc(c.author)} · ${esc(new Date(c.date).toLocaleDateString())}</small>${c.approved ? '<span class="commit-mark">Approved ✓</span>' : ''}</button></li>`).join('');
-    const current = $('#commit-list').querySelector('[data-sha="' + CSS.escape(scopeOf()) + '"]');
-    if (current && dialog.open) {
-      current.setAttribute('aria-current', 'true');
-      current.focus();
+    if (!data.commits.length) return;
+    if (selectCommit) {
+      const sha = data.commits.find(commit => commit.sha === lastCommit)?.sha || data.commits[0].sha;
+      await navigate(sha);
+    } else {
+      highlightCommit(viewParams.get('scope') || '');
     }
-  } catch (error) { $('#timeline-range').textContent = error.message; }
+  } catch (error) {
+    if (id !== timelineRequest) return;
+    list.replaceChildren();
+    $('#timeline-range').textContent = error.message;
+  }
+}
+$('#timeline-open').onclick = () => {
+  if (sendingReview) return;
+  if ($('#timeline').hidden || !$('#commit-list').childElementCount) openTimeline(true);
+  else $('#commit-list [aria-current]')?.focus();
 };
-$('#commit-list').onclick = e => {
-  const button = e.target.closest('button[data-sha]');
-  if (button) { $('#timeline').close(); navigate(button.dataset.sha); }
+$('#commit-list').onclick = event => {
+  const link = event.target.closest('a[data-sha]');
+  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  if (scopeOf() !== link.dataset.sha || diffLoading) navigate(link.dataset.sha);
 };
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--timeline-height', entry.target.getBoundingClientRect().height + 'px');
+}).observe($('#timeline'));
 $('#commit-approve').onclick = async () => {
   const current = session;
   $('#commit-approve').disabled = true;
@@ -545,6 +616,8 @@ $('#commit-approve').onclick = async () => {
     const response = await fetch('/api/commits/' + current.commit.sha + '/approve', {method:'POST', headers:{'X-Trace-Token':current.token}});
     if (!response.ok) throw Error((await response.json()).error);
     current.commit.approved = true;
+    const mark = $('#commit-list').querySelector(`[data-sha="${CSS.escape(current.commit.sha)}"] .commit-mark`);
+    if (mark) mark.hidden = false;
   } catch (error) { toast(error.message); }
   finally { completionButtons(); }
 };

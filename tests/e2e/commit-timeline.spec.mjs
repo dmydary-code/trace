@@ -15,16 +15,18 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   const feedback = () => run.events.filter(e => e.event === 'feedback');
   await page.goto(run.ready.url);
   await page.locator('#timeline-open').click();
-  const rows = page.locator('#commit-list button');
+  const rows = page.locator('#commit-list a');
   await expect(rows).toHaveCount(2);
-  await rows.first().click();
   await expect(page.locator('#title')).toHaveText('Include shipping');
   await page.locator('#commit-approve').click();
   await expect(page.locator('#commit-approve')).toBeDisabled();
-  await page.locator('#timeline-open').click();
-  await expect(rows.first()).toContainText('Approved');
-  await expect(rows.last()).not.toContainText('Approved');
+  await expect(rows.first()).toHaveAttribute('aria-current', 'page');
+  await expect(rows.first().locator('.commit-mark')).toBeVisible();
+  await expect(rows.last().locator('.commit-mark')).toBeHidden();
   await rows.last().click();
+  await expect(rows.first()).toBeInViewport();
+  await expect(rows.last()).toHaveAttribute('aria-current', 'page');
+  await expect(rows.last().locator('code')).toHaveText(sha.slice(0, 8));
   await expect(page.locator('#commit-body')).toHaveText('Use the billing currency.');
   await expect(page.locator('#feed')).toContainText('EUR');
   await expect(page.locator('#feed')).not.toContainText('USD');
@@ -57,4 +59,39 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   await expect(page.locator('.file-card .thread')).toContainText('Where is the account configured?');
   await run.end();
   expect(await run.exited).toBe(0);
+});
+
+test('a deep-linked timeline keeps its place when reading adjacent commits on a narrow screen', async ({page, f}) => {
+  await f.git('checkout', '-b', 'steps');
+  for (let step = 1; step <= 16; step++) {
+    await f.put('steps.txt', String(step) + '\n');
+    await f.git('add', 'steps.txt');
+    await f.git('commit', '-m', 'Step ' + step);
+  }
+  const app = await f.server({base:'main'});
+  const tip = await f.git('rev-parse', 'HEAD');
+  await page.setViewportSize({width:390, height:844});
+  await page.goto(app.url + '/?scope=' + tip);
+  const list = page.locator('#commit-list');
+  const link = step => list.getByRole('link', {name:new RegExp('^Step ' + step + ' ')});
+  await expect(link(16)).toBeInViewport();
+  await expect(link(16)).toHaveAttribute('aria-current', 'page');
+  const offset = await list.evaluate(el => el.scrollTop);
+  expect(offset).toBeGreaterThan(0);
+  await link(15).click();
+  await expect(page.locator('#title')).toHaveText('Step 15');
+  await expect(link(15)).toHaveAttribute('aria-current', 'page');
+  expect(await list.evaluate(el => el.scrollTop)).toBeCloseTo(offset, 0);
+  await page.goBack();
+  await expect(link(16)).toHaveAttribute('aria-current', 'page');
+  await page.reload();
+  await expect(link(16)).toBeInViewport();
+  await expect(page.locator('#title')).toHaveText('Step 16');
+  await page.setViewportSize({width:581, height:780});
+  const timeline = await page.locator('#timeline').boundingBox();
+  const detail = await page.locator('main').boundingBox();
+  expect(timeline.x + timeline.width).toBeLessThanOrEqual(detail.x + 1);
+  await link(15).click();
+  await expect(page.locator('#title')).toHaveText('Step 15');
+  await expect(link(16)).toBeInViewport();
 });
