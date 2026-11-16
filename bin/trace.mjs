@@ -32,6 +32,7 @@ Review options:
   --session-id ID   Bind viewer lifetime to an agent session (set by plugin hooks)
   --viewer-idle-timeout SECONDS  Close an unbound viewer after browser inactivity (default: 120)
   --wait            Return feedback to the calling agent and exit on submission
+  --listen          Return each message to this agent until the viewer closes
   --json            Print newline-delimited JSON events
   --no-open         Print URL without opening a browser
   --port NUMBER     Loopback port (default: assigned automatically)
@@ -52,12 +53,13 @@ let target;
 try {
   if (command === 'install') target = args.shift();
   const values = {'--viewer-idle-timeout':'viewerIdleTimeout','--session-id': 'agentSessionId', '--repo': 'repo', '--base': 'base', '--port': 'port', '--timeout': 'timeout', '--agent': 'agent', '--review': 'reviewId', '--comment': 'commentId', '--body-file': 'bodyFile', '--status': 'status'};
-  const flags = {'--merge-base': 'mergeBase', '--staged': 'staged', '--wait': 'wait', '--json': 'json', '--no-open': 'noOpen', '--browser-fallback':'browserFallback', '--help': 'help', '-h': 'help', '--version': 'version', '-v': 'version'};
+  const flags = {'--listen': 'listen', '--merge-base': 'mergeBase', '--staged': 'staged', '--wait': 'wait', '--json': 'json', '--no-open': 'noOpen', '--browser-fallback':'browserFallback', '--help': 'help', '-h': 'help', '--version': 'version', '-v': 'version'};
   for (let i = 0; i < args.length; i++) {
     if (values[args[i]]) { const key = values[args[i]]; if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`Missing value for ${args[i]}`); options[key] = args[++i]; }
     else if (flags[args[i]]) options[flags[args[i]]] = true;
     else throw new Error(`Unknown option: ${args[i]}`);
   }
+  if (options.listen) options.wait = true;
   const emit = data => process.stdout.write(JSON.stringify(data) + '\n');
   if (options.version) console.log(version);
   else if (options.help || command === 'help') console.log(usage);
@@ -141,7 +143,11 @@ try {
             finish(2);
           }, options.timeout * 1000);
         } else if(data.event==='client-ready'){cancelBrowserFallback();
-        } else if (data.event === 'feedback') { showFeedback(data); finish(data.outcome === 'cancelled' ? 3 : 0, true); }
+        } else if (data.event === 'feedback') {
+          showFeedback(data);
+          clearTimeout(timer);
+          if (!options.listen || data.outcome === 'cancelled') finish(data.outcome === 'cancelled' ? 3 : 0, !options.listen);
+        } else if (data.event === 'closed' && options.listen) { finish(0, true); }
         else if (data.event === 'error') { console.error(`Trace: ${data.message}`); finish(1); }
       });
       viewer.on('error', error => { console.error(`Trace: ${error.message}`); finish(1); });
@@ -151,7 +157,7 @@ try {
     } else {
       const app = await createTraceServer(options);
       app.events.on('client-ready',()=>cancelBrowserFallback());
-      app.events.once('review', review => showFeedback({event: 'feedback', ...review}));
+      app.events.on('review', review => showFeedback({event: 'feedback', ...review}));
       process.once('SIGINT', () => app.close()); process.once('SIGTERM', () => app.close());
       showReady({event: 'ready', url: app.url, repo: app.repository.repo, sessionId: app.sessionId});
     }

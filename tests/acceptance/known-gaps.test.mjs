@@ -7,9 +7,9 @@ import {openRepository} from '../../lib/git.mjs';
 import {buildGraph} from '../../lib/graph.mjs';
 import {diffTokens} from '../../dist/usages.mjs';
 for(const agent of ['codex','claude'])test('R-12/B-02 '+agent+' second round emits feedback to the initiating waiter',async t=>{
- const f=await fixture();t.after(()=>f.dispose());const run=await f.start({sessionId:agent}),app={url:run.ready.url},s=await session(app);
- const first=await post(app,s,undefined,{instruction:'Round one'});assert.equal(first.status,201);const {id}=await first.json();await run.exited;
- assert.equal((await post(app,s,'/api/reviews/'+id+'/approve')).status,200);assert.equal((await post(app,s,'/api/reviews/'+id+'/continue')).status,200);
+ const f=await fixture();t.after(()=>f.dispose());const run=await f.start({sessionId:agent,args:['--listen']}),app={url:run.ready.url},s=await session(app);
+ const first=await post(app,s,undefined,{instruction:'Round one'});assert.equal(first.status,201);const {id}=await first.json();
+ assert.equal((await post(app,s,'/api/reviews/'+id+'/continue')).status,200);
  const second=await post(app,s,undefined,{instruction:'Round two'});assert.equal(second.status,201);
  await eventually(()=>run.events.filter(e=>e.event==='feedback').length===2,'Saved round two has no second feedback event for the initiating agent',500);
 });
