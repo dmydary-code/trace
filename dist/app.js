@@ -111,7 +111,7 @@ function syncSubmitted(data) {
   $('#general-instruction').textContent = data.instruction;
   $('#general-replies').innerHTML = replies('review');
   completionButtons(); startReplies();
-  if(data.completion || data.outcome==='approved') continueAfterApproval(data);
+
 }
 function startReplies() {
   clearInterval(replyTimer);
@@ -126,6 +126,7 @@ function startReplies() {
         activeReview = data;
         for (const node of document.querySelectorAll('[data-replies]')) node.innerHTML = replies(node.dataset.replies);
         updatePendingComments();
+        if ($('#comment-menu').matches(':popover-open')) renderCommentList();
       }
       $('#reply-connection').textContent = 'Agent replies update automatically. Statuses are reported by the agent; resolve threads after checking the fix.';
     } catch {
@@ -137,7 +138,7 @@ function composer(f, index) { const l = f.lines[index]; return `<form class="com
 function fileCard(f) {
   const tokens={old:diffTokens(f.lines,'old',f.path),new:diffTokens(f.lines,'new',f.path)};
   const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card ${state.mode==='files' && r.done.includes(f.path) && !r.comments.some(c=>c.id===activeCommentId&&c.path===f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => !session?.verifying && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  return `<article class="file-card ${state.mode==='files' && r.done.includes(f.path) && !r.comments.some(c=>c.id===activeCommentId&&c.path===f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => (!session?.verifying || activeReview?.revision === session.revision) && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
 }
 function renderFeed() {
   if(diffLoading || !session){$('#feed').innerHTML='<div class="empty" role="status" aria-busy="true">Loading diff…</div>';return;}
@@ -168,7 +169,7 @@ document.addEventListener('submit', e => {
   else review().comments.push({id: crypto.randomUUID(), path: f.path, index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body, resolved: false});
   delete review().drafts[editor]; editor = null; editId = null; persist(); renderFeed(); counts(); toast('Comment added to review');
 });
-document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) review().done.push(path); persist(); tree(); counts(); renderFeed(); } });
+document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) { review().done.push(path); if (review().comments.some(c => c.id === activeCommentId && c.path === path)) activeCommentId = null; } persist(); tree(); counts(); renderFeed(); } });
 $('#theme').onclick = () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
 for (const mode of ['files', 'graph']) $('#' + (mode === 'graph' ? 'route' : mode) + '-mode').onclick = () => { state.mode = mode; state.sidebarCollapsed = mode === 'graph'; persist(); render(); };
@@ -190,7 +191,8 @@ $('#instruction').oninput = e => { review().instruction = e.target.value; persis
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
 function confirmSubmission(job,outcome){
- syncSubmitted({...job.review,replies:job.review.replies||[]});render();showReviewSent(outcome);
+ syncSubmitted({...job.review,replies:job.review.replies||[]});render();$('#handoff').close();toast(outcome==='approved'?'✓ Review approved':outcome==='cancelled'?'Review cancelled':'✓ Review sent');
+ if(outcome==='approved')continueAfterApproval(job.review);
  $('#job-state').textContent=outcome==='approved'?'✓ Review approved':outcome==='cancelled'?'Review cancelled':'✓ Review sent. Awaiting agent replies.';
  if(job.status==='submitted')return;
  jobTimer=setInterval(async()=>{try{
@@ -206,7 +208,7 @@ async function send(outcome) {
  if(sendingReview||submitted)return;
  const payload=packet(outcome);let rejected=false;
  sendingReview=true;sendingCommentIds=new Set(payload.comments.map(c=>c.id));
- $('#handoff').close();toast('Sending review…');render();$('#job-state').textContent='Submitting review…';dialogButtons();
+ $('#instruction').disabled=true;render();$('#job-state').textContent='Sending review…';dialogButtons();
  try{
   const response=await fetch('/api/reviews',{method:'POST',headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
   rejected=!response.ok;const job=await response.json();if(rejected)throw Error(job.error||'Review could not be submitted');
@@ -218,9 +220,9 @@ async function send(outcome) {
    confirmSubmission({id:latest.submittedReview.id,status:session.agent?'running':'submitted',review:latest.submittedReview},outcome);
   }else{
    const message=rejected||latest&&!latest.submittedReview?'Review was not sent: '+error.message:'Could not confirm delivery. Reconnect or reload to check the saved review before retrying.';
-   $('#job-state').textContent=message;toast(message);openReview();
+   $('#job-state').textContent=message;toast(message);
   }
- }finally{sendingReview=false;sendingCommentIds.clear();updatePendingComments();render();dialogButtons();}
+ }finally{sendingReview=false;$('#instruction').disabled=submitted;sendingCommentIds.clear();updatePendingComments();render();dialogButtons();}
 }
 $('#send').onclick = () => send('changes_requested'); $('#approve').onclick = () => send('approved'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession() {
@@ -265,7 +267,7 @@ function resetGraph() {
 }
 async function loadGraph(){
  const target=session;if(!target||graphLoading===target)return;graphLoading=target;
- try{const response=await fetch('/api/graph?revision='+encodeURIComponent(target.revision));const data=await response.json();if(!response.ok)throw new Error(data.error);if(session===target){target.graph=data.graph;graphError=null;}}
+ try{const response=await fetch('/api/graph?revision='+encodeURIComponent(target.revision)+(target.verifying?'&view=current':''));const data=await response.json();if(!response.ok)throw new Error(data.error);if(session===target){target.graph=data.graph;graphError=null;}}
  catch(error){if(session===target)graphError=error.message;}
  finally{if(graphLoading===target)graphLoading=null;if(session===target&&state.mode==='graph')renderGraph();}
 }
@@ -280,7 +282,10 @@ function renderGraph() {
     graphRevision = session?.revision;
     selectedNode = openedNode = null; revealedNodes.clear(); expandedNodes.clear(); draggedPositions.clear(); graphScale = 1;
   }
-  const visible = graph.nodes.filter(n => !review().done.includes(n.path) && (n.changed || revealedNodes.has(n.path)) && (!query || n.path.toLowerCase().includes(query)));
+  // A change confined to a barrel can redirect two otherwise unchanged files.
+  const rerouted = new Set(graph.nodes.some(node => node.changed) ? [] :
+    graph.edges.filter(edge => edge.change).flatMap(edge => [edge.source, edge.target]));
+  const visible = graph.nodes.filter(n => !review().done.includes(n.path) && (n.changed || revealedNodes.has(n.path) || rerouted.has(n.path)) && (!query || n.path.toLowerCase().includes(query)));
   const layout = stableGraphLayout(graph.nodes, graph.edges);
   const {positions, branches} = layout;
   for(const [path, point] of draggedPositions) if(positions.has(path)) positions.set(path, point);
@@ -334,13 +339,27 @@ function renderGraph() {
   $('#reset-graph').onclick = resetGraph;
   $('#feed').querySelectorAll('[data-node]').forEach(el=>{
     const path=el.dataset.node;
+    const badge = el.querySelector('.graph-comment-badge');
+    if (badge) {
+      badge.setAttribute('role', 'button');
+      badge.setAttribute('tabindex', '0');
+      const openThread = event => {
+        event.stopPropagation();
+        const comment = orderedComments().find(c => c.path === path);
+        if (comment) showComment(comment.id);
+      };
+      badge.onclick = openThread;
+      badge.onkeydown = event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openThread(event); }
+      };
+    }
     el.onclick=()=>selectGraphNode(path);
     el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectGraphNode(path);}};
     let drag=null;
     const svg=el.ownerSVGElement;
     const point=e=>new DOMPoint(e.clientX,e.clientY).matrixTransform(svg.getScreenCTM().inverse());
     el.onpointerdown=e=>{
-      if(e.button!==0)return;
+      if(e.button!==0 || e.target.closest('.graph-comment-badge'))return;
       drag={start:point(e), original:{...positions.get(path)}, moved:false};
       el.setPointerCapture(e.pointerId);
     };
@@ -497,16 +516,6 @@ document.addEventListener('keydown',e=>{if(e.altKey&&e.key==='F7'){if(e.target.m
 function closeDiffUsages(){usageSelection=null;applyUsageHighlights();usagesDialog.hidden=true;document.body.classList.remove('usages-open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!usagesDialog.hidden){closeDiffUsages();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('.diff-symbol')){e.preventDefault();openDiffUsages(e.target);}});
 
-function showReviewSent(outcome){
- const dialog=$('#handoff');
- const message=outcome==='approved'?'Review approved':outcome==='cancelled'?'Review cancelled':'Review sent';
- if(!dialog.open){toast('✓ '+message);return;}
- $('#job-state').textContent='✓ '+message;
- dialog.classList.add('review-sent');
- setTimeout(()=>{if(!dialog.open){dialog.classList.remove('review-sent');return;}dialog.classList.add('review-closing');setTimeout(()=>{dialog.close();dialog.classList.remove('review-closing','review-sent');toast('✓ '+message);},180);},650);
-}
-
-
 async function continueAfterApproval(approval){
  if(continuingApproval)return;
  continuingApproval=true;
@@ -546,21 +555,58 @@ function applyUsageHighlights(){
 
 function orderedComments(){
  const order=new Map(fileTreeOrder(files()).map((f,i)=>[f.path,i]));
- return [...review().comments].sort((a,b)=>(order.get(a.path)??Infinity)-(order.get(b.path)??Infinity)||a.index-b.index||a.id.localeCompare(b.id));
+ return [...review().comments].sort((a,b)=>(order.get(a.path)??Infinity)-(order.get(b.path)??Infinity)||a.index-b.index);
 }
 function updateCommentNavigation(){
  const comments=orderedComments(),index=comments.findIndex(c=>c.id===activeCommentId),noun=comments.length===1?'comment':'comments';
  $('#comment-position').textContent=index<0?`${comments.length} ${noun}`:`${index+1} / ${comments.length} ${noun}`;
- $('#previous-comment').disabled=$('#next-comment').disabled=!comments.length;
+ $('#comment-position').disabled=$('#previous-comment').disabled=$('#next-comment').disabled=!comments.length;
 }
-async function navigateComment(direction){
- const comments=orderedComments();if(!comments.length)return;
- const current=comments.findIndex(c=>c.id===activeCommentId),index=current<0?(direction>0?0:comments.length-1):(current+direction+comments.length)%comments.length;
- const target=comments[index];if(session.verifying)await loadSession();
- activeCommentId=target.id;query='';$('#search').value='';editor=null;editId=null;
- if(state.mode==='graph'){if(!session.graph)await loadGraph();selectGraphNode(target.path);}else renderFeed();
- tree();counts();const element=document.querySelector(`[data-comment-id="${CSS.escape(target.id)}"]`);
- if(element){element.focus({preventScroll:true});element.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});}
+function renderCommentList() {
+ const comments = orderedComments();
+ $('#comment-links').innerHTML = comments.map(comment => {
+   const count = (activeReview?.replies || []).filter(reply => reply.commentId === comment.id).length;
+   const status = count ? ` · ${count} ${count === 1 ? 'reply' : 'replies'}` : commentPending(comment.id) ? ' · Awaiting reply' : '';
+   return `<button data-thread-link="${esc(comment.id)}"><small>${esc(comment.path)}:${comment.line}${status}</small><span>${esc(comment.body)}</span></button>`;
+ }).join('');
+}
+$('#comment-menu').addEventListener('beforetoggle', event => { if(event.newState==='open')renderCommentList(); });
+$('#comment-links').onclick = event => {
+ const link = event.target.closest('[data-thread-link]');
+ if (link) showComment(link.dataset.threadLink);
+};
+async function showComment(id) {
+ $('#comment-menu').hidePopover();
+ if (session.verifying && session.revision !== activeReview?.revision) {
+   await loadSession();
+   if (session.verifying) return;
+   state.mode = 'files';
+ }
+ const target = review().comments.find(comment => comment.id === id);
+ if (!target) return;
+ activeCommentId = id;
+ activePath = target.path;
+ query = ''; $('#search').value = ''; editor = null; editId = null;
+ if (state.mode === 'graph' && session.graph?.nodes.some(node => node.path === target.path) &&
+     files().some(file => file.path === target.path && file.status !== 'D')) selectGraphNode(target.path);
+ let element = state.mode === 'graph' && $('#feed').querySelector(`[data-comment-id="${CSS.escape(id)}"]`);
+ if (!element || !element.classList.contains('comment-current')) {
+   state.mode = 'files';
+   render(); persist();
+   element = $('#feed').querySelector(`[data-comment-id="${CSS.escape(id)}"]`);
+ } else { tree(); counts(); }
+ if (element) {
+   element.focus({preventScroll:true});
+   element.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+ } else toast('This line is unavailable in the displayed diff.');
+}
+function navigateComment(direction) {
+ const comments = orderedComments();
+ if (!comments.length) return;
+ const current = comments.findIndex(c => c.id === activeCommentId);
+ const start = direction > 0 ? 0 : comments.length - 1;
+ const index = current < 0 ? start : (current + direction + comments.length) % comments.length;
+ return showComment(comments[index].id);
 }
 $('#previous-comment').onclick=()=>navigateComment(-1);
 $('#next-comment').onclick=()=>navigateComment(1);

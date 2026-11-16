@@ -1,4 +1,6 @@
 import {test,expect,load,addComment,graph,select,send} from './fixtures.mjs';
+import {writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
 import {session,eventually,freePort} from '../support/harness.mjs';
 test('fix: Enter adds feedback, Shift+Enter keeps a newline, blank text stays unsent',async({page,app})=>{
  await load(page,app);await page.locator('.line.add .comment-trigger').first().click();await page.locator('#comment-body').press('Enter');await expect(page.locator('.file-card .thread')).toHaveCount(0);
@@ -24,7 +26,7 @@ test('fix: comment count and arrows navigate all threads in file order and prese
 });
 test('fix: sending has a busy state, then a clickable sent state; lost acknowledgement reconciles',async({page,app})=>{
  await load(page,app);await addComment(page,'Feedback');let release;const gate=new Promise(r=>release=r);await page.route('**/api/reviews',async route=>{await gate;await route.fetch();await route.abort();});
- await page.locator('#review').click();await page.locator('#send').click();await expect(page.locator('#review')).toHaveAttribute('aria-busy','true');await expect(page.locator('#review-label')).toHaveText('Sending…');release();await expect(page.locator('#review-label')).toHaveText('Review sent');await expect(page.locator('#review')).toBeEnabled();await expect(page.locator('#review')).toHaveAttribute('aria-busy','false');await expect(page.locator('#handoff')).not.toBeVisible();
+ await page.locator('#review').click();await page.locator('#send').click();await expect(page.locator('#review')).toHaveAttribute('aria-busy','true');await expect(page.locator('#review-label')).toHaveText('Sending…');await expect(page.locator('#handoff')).toBeVisible();release();await expect(page.locator('#review-label')).toHaveText('Review sent');await expect(page.locator('#review')).toBeEnabled();await expect(page.locator('#review')).toHaveAttribute('aria-busy','false');await expect(page.locator('#handoff')).not.toBeVisible();
  await page.locator('#review').click();await expect(page.locator('#job-state')).toContainText('Review sent');await expect(page.locator('#send')).not.toBeVisible();await page.locator('#close-dialog').click();await page.reload();await expect(page.locator('.file-card .thread')).toContainText('Feedback');
 });
 test('fix: unbound viewer stays available after Send and reload, then releases its idle port',async({page,f})=>{
@@ -32,4 +34,27 @@ test('fix: unbound viewer stays available after Send and reload, then releases i
 });
 test('fix: imports remain clickable but are absent from usages and match highlights',async({page,app})=>{
  await load(page,app);const imported=page.locator('.line.context [data-symbol="subtotal"]').first();await imported.click();await expect(page.locator('[data-usage-result]')).toHaveCount(1);await expect(page.locator('.usage-results')).not.toContainText('import');await expect(page.locator('.usage-match')).toHaveCount(1);await expect(page.locator('.usage-match')).toContainText('return subtotal');
+});
+
+test('header opens an original thread and its reply after the file changes', async ({page, app, f}) => {
+ await load(page,app);
+ await graph(page); await select(page,'src/pricing.ts');
+ await addComment(page,'Please include shipping'); await send(page);
+ const {submittedReview} = await session(app);
+ const {id} = submittedReview.comments[0];
+ const reply = join(f.dir,'reply.txt');
+ await writeFile(reply,'Shipping included.');
+ await f.cli('reply','--review',submittedReview.id,'--comment',id,'--agent','codex','--body-file',reply);
+ await expect(page.locator('.agent-reply')).toContainText('Shipping included.');
+ await f.put(f.project.path,f.project.fixed);
+ await page.locator('#verify-latest').click();
+ await expect(page.locator('#back-to-threads')).toBeVisible();
+ await page.locator('.graph-comment-badge').click();
+ await expect(page.locator('.comment-current')).toContainText('Shipping included.');
+ await expect(page.locator('#files-mode')).toHaveAttribute('aria-pressed','true');
+ await page.locator('header #comment-position').click();
+ await expect(page.locator('#comment-links')).toContainText('1 reply');
+ await page.locator('#comment-links button').click();
+ await expect(page.locator('.comment-current')).toBeInViewport();
+ await expect(page.locator('.comment-current')).toBeFocused();
 });

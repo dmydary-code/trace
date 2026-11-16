@@ -13,7 +13,7 @@ test('G-02/03/05 stable imports/calls and explicit added/removed relations',asyn
 });
 test('G-02 CommonJS and re-export resolve relative targets; externals and missing files excluded',async t=>{
  const f=await setup(t);await f.put('src/consumer.cjs',"const x = require('./subtotal.js');\nrequire('node:fs');\nrequire('./absent');\n");await f.put('src/barrel.js',"export { subtotal } from './subtotal.js';\n");const g=await graph(f);
- assert(edge(g,'src/consumer.cjs','src/subtotal.js','Imports'));assert(edge(g,'src/barrel.js','src/subtotal.js','Imports'));assert(!g.edges.some(e=>e.target==='node:fs'||e.target.includes('absent')));
+ assert(edge(g,'src/consumer.cjs','src/subtotal.js','Imports'));assert(!g.nodes.some(n=>n.path==='src/barrel.js'));assert(!g.edges.some(e=>e.target==='node:fs'||e.target.includes('absent')));
 });
 test('G-04/06/07/08/09 types, multiple test targets and explicit role mapping',async t=>{
  const f=await fixture('typescript');t.after(()=>f.dispose());await f.put('src/other.ts','export function other() {}\n');await f.put('src/folder/index.ts','export function nested() {}\n');
@@ -46,4 +46,38 @@ test('G-16/N-06 diff remains usable while Graph builds, rejects, coalesces and r
 test('G-17 historical review refuses to build Graph from a different working tree',async t=>{
  const f=await setup(t);const app=await f.server(),s=await session(app);assert.equal((await post(app,s,undefined,{instruction:'Include shipping'})).status,201);await f.put(f.project.path,f.project.fixed);
  const res=await fetch(app.url+'/api/graph?revision='+s.revision);assert.equal(res.status,409);assert.match((await res.json()).error,/saved review differs/);
+ const latest=await (await openRepository(f.repo)).snapshot();
+ const current=await fetch(app.url+'/api/graph?view=current&revision='+latest.revision);
+ assert.equal(current.status,200);assert.equal((await current.json()).graph.sources[f.project.path],f.project.fixed);
+});
+
+test('barrels route named, wildcard and type-only bindings through chains and cycles', async t => {
+ const f = await setup(t);
+ const sources = {
+   'src/api/index.ts': "export * from './loop'; export * from '../actions'; export * from '../other';",
+   'src/api/loop.ts': "export * from './index'; export type { Cart } from '../types';",
+   'src/actions.ts': "import { subtotal as action } from './subtotal'; export { action as compute };",
+   'src/other.ts': 'export const unrelated = 4;',
+   'src/use.ts': "import {compute as total, type Cart} from './api'; total();",
+   'src/types.ts': 'export interface Cart {}',
+   'src/component/index.ts': "export {subtotal} from '../subtotal'; registerComponent();",
+   'src/pass.cjs': "module.exports = require('./subtotal.js');",
+   'src/use.cjs': "require('./pass.cjs');"
+ };
+ for (const [path, code] of Object.entries(sources)) await f.put(path, code);
+ const g = await graph(f);
+ for (const kind of ['Imports','Calls']) assert(edge(g,'src/use.ts','src/subtotal.js',kind));
+ assert(edge(g,'src/use.ts','src/types.ts','Uses type'));
+ assert(!g.edges.some(e=>e.source==='src/use.ts' && e.target==='src/other.ts'));
+ assert(edge(g,'src/use.cjs','src/subtotal.js','Imports'));
+ assert(g.nodes.some(n=>n.path==='src/component/index.ts'));
+ for (const path of ['src/api/index.ts','src/api/loop.ts','src/actions.ts','src/pass.cjs']) {
+   assert(!g.nodes.some(n=>n.path===path));
+   assert(!g.edges.some(e=>e.source===path || e.target===path));
+ }
+ await f.git('add','.'); await f.git('commit','-m','barrel base');
+ await f.put('src/actions.ts',"export {unrelated as compute} from './other';");
+ const updated = await graph(f);
+ assert.equal(edge(updated,'src/use.ts','src/subtotal.js','Calls').change,'−');
+ assert.equal(edge(updated,'src/use.ts','src/other.ts','Calls').change,'+');
 });

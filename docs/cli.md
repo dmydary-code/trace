@@ -22,6 +22,7 @@ trace-review --base origin/main --merge-base  # Branch/MR-style baseline
 trace-review --repo /path/to/project --no-open
 trace-review feedback --json           # Latest submitted review, including replies
 trace-review feedback --review ID --json # A specific saved review
+trace-review open                       # Reopen the most recent submission with its replies
 trace-review open --review ID           # Reopen its original diff and threads
 trace-review doctor                    # Check Git, repository, and installed agents
 ```

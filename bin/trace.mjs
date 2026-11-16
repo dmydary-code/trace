@@ -20,7 +20,7 @@ const usage = `Trace ${version} — local code review for your current agent
 Usage: trace-review [review] [options]
        trace-review feedback [--review ID] [--repo path] [--json]
        trace-review reply --review ID --comment ID --agent codex|claude --body-file PATH
-       trace-review open --review ID [--repo path] [--no-open]
+       trace-review open [--review ID] [--repo path] [--no-open]
        trace-review install codex|claude|all
        trace-review doctor [--repo path] [--json]
 
@@ -95,8 +95,9 @@ try {
     if (!Number.isFinite(options.timeout) || options.timeout < 0) throw new Error('Timeout must be a non-negative number');
     if (options.agent && options.wait) throw new Error('--agent and --wait are separate handoff modes');
     if (command === 'open') {
-      if (!options.reviewId || options.wait || options.agent) throw new Error('Use open --review ID without --wait or --agent');
+      if (options.wait || options.agent) throw new Error('Use open without --wait or --agent');
       const {gitDir} = await openRepository(options.repo);
+      options.reviewId ??= (await readReview(gitDir)).id;
       await readSnapshot(gitDir, options.reviewId);
     } else if (options.reviewId) throw new Error('Use trace-review open --review ID to reopen a saved review');
     let cancelBrowserFallback=()=>{};

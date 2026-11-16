@@ -58,10 +58,11 @@ export async function createTraceServer(options = {}) {
       if (req.headers['sec-fetch-site'] === 'cross-site' && !navigation) return json(res, 403, {error: 'Cross-site requests are not allowed'});
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, await snapshot());
       if(req.method==='GET' && url.pathname==='/api/graph'){
-        const data=await snapshot();
+        const latest = submittedId && url.searchParams.get('view') === 'current';
+        const data = latest ? await currentSnapshot() : await snapshot();
         if(url.searchParams.get('revision')!==data.revision)return json(res,409,{error:'Diff changed. Refresh before loading Graph.'});
         if(data.graph)return json(res,200,{revision:data.revision,graph:data.graph});
-        if(submittedId && (await repository.snapshot()).revision!==data.revision)return json(res,409,{error:'This saved review differs from the working tree. Review latest changes to build its Graph.'});
+        if(submittedId && !latest && (await repository.snapshot()).revision!==data.revision)return json(res,409,{error:'This saved review differs from the working tree. Review latest changes to build its Graph.'});
         let entry=graphCache.get(data.revision);
         if(!entry || (!entry.pending && Date.now()-entry.created>2000)){
           const promise=(options.graphBuilder||buildGraph)(repository.repo,data);entry={created:Date.now(),promise,pending:true};promise.finally(()=>{entry.pending=false;entry.created=Date.now();}).catch(()=>{});graphCache.clear();graphCache.set(data.revision,entry);promise.catch(()=>graphCache.delete(data.revision));
