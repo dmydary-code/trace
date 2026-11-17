@@ -6,7 +6,6 @@ import {fileURLToPath} from 'node:url';
 import {spawn, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createServer} from 'node:net';
-import {setTimeout as delay} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
 import {createTraceServer} from '../../server.mjs';
 import {projectById} from './projects.mjs';
@@ -17,24 +16,8 @@ export async function eventually(check, message='Condition not reached', timeout
  while(Date.now()<end){try{const result=await check();if(result)return result;}catch(error){last=error;}await new Promise(r=>setTimeout(r,25));}
  throw new Error(message+(last ? ': '+last.message : ''));
 }
-export async function freePort(url, timeout = 6000) {
- const port = Number(new URL(url).port);
- const deadline = performance.now() + timeout;
- while (true) {
-   const probe = createServer();
-   try {
-     await new Promise((resolve, reject) => {
-       probe.once('error', reject);
-       probe.listen(port, '127.0.0.1', resolve);
-     });
-   } catch (error) {
-     if (error.code !== 'EADDRINUSE' || performance.now() >= deadline) throw error;
-     await delay(25);
-     continue;
-   }
-   await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()));
-   return;
- }
+export async function freePort(url) {
+ const server=createServer();await new Promise((ok,fail)=>{server.once('error',fail);server.listen(+new URL(url).port,'127.0.0.1',ok);});await new Promise(ok=>server.close(ok));
 }
 export async function fixture(id='javascript',{changed=true,commit=true}={}) {
  const project=projectById(id),dir=await realpath(await mkdtemp(join(tmpdir(),'trace-acceptance-'))),repo=join(dir,'repo'),cleanups=[];

@@ -5,26 +5,9 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawn, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {createServer} from 'node:net';
 import {watchSession} from '../lib/session-lifecycle.mjs';
-import {freePort} from './support/harness.mjs';
 const exec=promisify(execFile);
 const hook=resolve('plugins/trace/hooks/session.mjs');
-test('port probe waits for the listener to release the port after an HTTP disconnect', async t => {
- const listener = createServer(socket => socket.once('data', () => socket.destroy()));
- await new Promise((resolve, reject) => {
-   listener.once('error', reject);
-   listener.listen(0, '127.0.0.1', resolve);
- });
- t.after(() => { if (listener.listening) listener.close(); });
- const url = 'http://127.0.0.1:' + listener.address().port;
- await assert.rejects(fetch(url, {signal: AbortSignal.timeout(1000)}));
- await assert.rejects(freePort(url, 100), {code: 'EADDRINUSE'});
- const release = setTimeout(() => listener.close(), 100);
- t.after(() => clearTimeout(release));
- await freePort(url);
- assert.equal(listener.listening, false);
-});
 async function runHook(env,input){return exec(process.execPath,['--input-type=module','-e',`import {handleSession} from ${JSON.stringify('file://'+hook)};await handleSession(${JSON.stringify(input)});`],{env});}
 async function until(check){for(let i=0;i<100;i++){if(await check())return;await new Promise(r=>setTimeout(r,25));}assert.fail('Timed out');}
 test('session end closes only its own viewer; compact preserves it and clear replaces its lease',async t=>{
@@ -61,7 +44,8 @@ test('submitted viewer stays available until session ends, then releases its por
  await until(()=>code!==undefined);assert.equal(code,0);
  assert.equal((await fetch(ready.url+'/api/session')).status,200);
  await runHook(env,{session_id:'review',hook_event_name:'SessionEnd',reason:'clear'});
- await freePort(ready.url);
+ await until(()=>fetch(ready.url).then(()=>false,()=>true));
+ const net=await import('node:net');const server=net.createServer();await new Promise((ok,fail)=>{server.once('error',fail);server.listen(Number(new URL(ready.url).port),'127.0.0.1',ok);});await new Promise(ok=>server.close(ok));
 });
 test('without a session lease inactive browser ownership does not leave a detached server', {timeout:15000},async t=>{
  const dir=await mkdtemp(join(tmpdir(),'trace-unowned-'));t.after(()=>rm(dir,{recursive:true,force:true}));
