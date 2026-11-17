@@ -167,11 +167,3 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
 [data-new-year] .new-year-garland {display:block; position:absolute; inset:0 0 auto; height:10px; overflow:hidden}
 [data-new-year] .tree-lights {display:inline}
 [data-new-year] .logo svg path:first-child {fill:color-mix(in srgb,var(--mint) 18%,var(--bg))}
-@media (prefers-reduced-motion:no-preference) {
-  [data-new-year] .tree-lights circle {animation:tree-twinkle 6.8s ease-in-out infinite}
-  .tree-lights circle:nth-child(2) {animation-delay:-3.7s}
-  .tree-lights circle:nth-child(3) {animation-delay:-1.5s}
-  .tree-lights circle:nth-child(4) {animation-delay:-5.2s}
-  .tree-lights circle:nth-child(5) {animation-delay:-2.6s}
-  @keyframes tree-twinkle {0%,45%,100% {opacity:.46} 64%,74% {opacity:1}}
-}

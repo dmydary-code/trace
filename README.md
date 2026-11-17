@@ -17,7 +17,7 @@ Local code review for **Codex and Claude Code**. Explore changes, leave line com
 
 Graph currently analyzes relative JavaScript/TypeScript dependencies. Find Usages matches identifier names within one side of the diff, so unrelated same-name symbols can appear together. [Graph details](docs/graph.md).
 
-Open **Appearance** in the header and select **New Year lights** to decorate the Trace tree and header in either color scheme. The tree lights stay steady when reduced motion is enabled.
+Open **Appearance** in the header and select **New Year lights** to decorate the Trace tree and header in either color scheme.
 
 ## Install
 
