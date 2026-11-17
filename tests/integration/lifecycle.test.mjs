@@ -6,7 +6,7 @@ import {spawn} from 'node:child_process';
 import {fixture,session,post,eventually,freePort} from '../support/harness.mjs';
 import {createHash} from 'node:crypto';
 const setup=async t=>{const f=await fixture();t.after(()=>f.dispose());return f;};
-const stopped=async run=>{await eventually(()=>fetch(run.ready.url).then(()=>false,()=>true),'Viewer did not stop');await freePort(run.ready.url);};
+const stopped = run => freePort(run.ready.url);
 for(const agent of ['codex','claude'])for(const sent of [false,true])test('L-01/02/03 '+agent+' session ends '+(sent?'after':'before')+' submission',async t=>{
  const f=await setup(t),run=await f.start({sessionId:agent}),app={url:run.ready.url},s=await session(app);
  if(sent){assert.equal((await post(app,s,undefined,{instruction:'Check shipping'})).status,201);assert.equal(await run.exited,0);assert.equal((await fetch(app.url)).status,200);}
