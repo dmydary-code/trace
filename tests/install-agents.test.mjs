@@ -33,6 +33,13 @@ test('repairs a missing old Homebrew source and registers the stable path',async
  assert.equal(result[0].ok,true);assert(f.calls.some(c=>c.join(' ')==='codex plugin marketplace add '+stable));
  assert.equal(stableTraceRoot('/tmp/trace'),'/tmp/trace');
 });
+test('Codex reinstalls from the existing local Homebrew catalog without a Git marketplace upgrade', async () => {
+ const f = fixture();
+ const result = await installAgents({target: 'codex', root, version: '0.4.1', ...f});
+ assert.equal(result[0].ok, true);
+ assert(!f.calls.some(call => call.includes('upgrade')));
+ assert(f.calls.some(call => call.join(' ') === 'codex plugin add trace@trace-tools'));
+});
 test('stale versions and disabled plugins are failures, not successful installs',async()=>{
  for(const options of [{wrongVersion:true},{disabled:true}]){
   const result=await installAgents({target:'claude',root,version:'0.4.1',...fixture(options)});assert.equal(result[0].ok,false);
