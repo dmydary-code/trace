@@ -39,6 +39,8 @@ For automation, `--wait --json` prints newline-delimited events: `ready` with th
 
 Use **Approve** in the header to save an approved outcome for the displayed revision, end the local viewer and release its port. A connected listener receives the approval before it exits.
 
+In terminal Codex, the Trace plugin uses `--listen` for the full conversation. Enable the Trace lifecycle hooks in `/hooks` after installing the updated plugin. While a bound listener is alive, its Stop hook asks Codex to keep waiting. To recover unanswered messages after losing the shell handle, run `trace-review pending --json` in the owning Codex session. For a saved round, use `trace-review open --review ID --listen`. Use `trace-review stop-waiting` to end listening in this agent session. These commands also accept an explicit `--session-id`.
+
 **Viewed** marks a commit as read. Toggle the checkbox in the diff or directly in the timeline without leaving the current commit. The mark persists per full SHA in this worktree and can be cleared. **Approve commit** saves a separate approval for that SHA. Sending a message and approving a commit are independent. Use the Messages selector to reopen earlier rounds, or Reply to continue at the original anchor. Existing saved reviews remain readable.
 
 ### Optional separate agent

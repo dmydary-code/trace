@@ -7,7 +7,9 @@ import {promisify} from 'node:util';
 import {createTraceServer} from '../server.mjs';
 import {openRepository} from '../lib/git.mjs';
 import {gitOutput} from '../lib/git-command.mjs';
-import {sessionLease, agentOwner, ownedSessionLease} from '../plugins/trace/hooks/session.mjs';
+import {sessionLease, currentSessionLease, agentOwner, ownedSessionLease} from '../plugins/trace/hooks/session.mjs';
+import {stopListeners} from '../plugins/trace/hooks/listeners.mjs';
+import {pendingFeedback} from '../lib/pending.mjs';
 import {browserFallback} from '../lib/browser-fallback.mjs';
 import {installAgents} from '../lib/install-agents.mjs';
 import {readReview, readSnapshot, addReply} from '../lib/reviews.mjs';
@@ -20,7 +22,9 @@ const usage = `Trace ${version} — local code review for your current agent
 Usage: trace-review [review] [options]
        trace-review feedback [--review ID] [--repo path] [--json]
        trace-review reply --review ID --comment ID --agent codex|claude --body-file PATH
-       trace-review open [--review ID] [--repo path] [--no-open]
+       trace-review open [--review ID] [--repo path] [--no-open] [--listen]
+       trace-review pending [--session-id ID] [--timeout SECONDS] --json
+       trace-review stop-waiting [--session-id ID]
        trace-review install codex|claude|all
        trace-review doctor [--repo path] [--json]
 
@@ -48,7 +52,7 @@ Review options:
 `;
 const args = process.argv.slice(2);
 const command = args[0] && !args[0].startsWith('-') ? args.shift() : 'review';
-const options = {repo: process.cwd(), port: 0, timeout: 1800};
+const options = {repo: process.cwd(), port: 0, timeout: command === 'pending' ? 25 : 1800};
 let target;
 try {
   if (command === 'install') target = args.shift();
@@ -70,6 +74,16 @@ try {
       catch(error){throw new Error(error.stderr?.trim() || error.message);}
     }});
     if(results.some(result=>!result.ok))process.exitCode=1;
+  } else if (command === 'pending' || command === 'stop-waiting') {
+    const id = options.agentSessionId || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID;
+    if (!id) throw new Error('Specify the owning agent session with --session-id');
+    const lease = await currentSessionLease(id);
+    if (command === 'stop-waiting') stopListeners(lease);
+    else {
+      const seconds = Number(options.timeout);
+      if (!Number.isFinite(seconds) || seconds < 0) throw new Error('Invalid wait timeout');
+      emit(await pendingFeedback(lease, seconds));
+    }
   } else if (command === 'feedback') {
     const {gitDir} = await openRepository(options.repo);
     const review = await readReview(gitDir, options.reviewId);
@@ -97,7 +111,7 @@ try {
     if (!Number.isFinite(options.timeout) || options.timeout < 0) throw new Error('Timeout must be a non-negative number');
     if (options.agent && options.wait) throw new Error('--agent and --wait are separate handoff modes');
     if (command === 'open') {
-      if (options.wait || options.agent) throw new Error('Use open without --wait or --agent');
+      if ((options.wait && !options.listen) || options.agent) throw new Error('Use open --listen to receive messages from a reopened review');
       const {gitDir} = await openRepository(options.repo);
       options.reviewId ??= (await readReview(gitDir)).id;
       await readSnapshot(gitDir, options.reviewId);

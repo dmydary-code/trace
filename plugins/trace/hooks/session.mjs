@@ -1,3 +1,4 @@
+import {activeListeners, stopListeners} from './listeners.mjs';
 import {mkdir, readFile, writeFile, rm, readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -25,6 +26,14 @@ export async function sessionLease(id) {
   const record = JSON.parse(await readFile(path, 'utf8'));
   return {path, token:record.token, ownerPid:record.ownerPid};
 }
+export async function currentSessionLease(id) {
+  try {
+    return await sessionLease(id);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
 // Infer ownership only when one unambiguous session belongs to this agent process.
 export async function ownedSessionLease(ownerPid){
  if(!ownerPid)return null;
@@ -35,7 +44,19 @@ export async function ownedSessionLease(ownerPid){
 export async function handleSession(input) {
   if (!input.session_id) return;
   const path = sessionPath(input.session_id);
-  if (input.hook_event_name === 'SessionEnd') { await rm(path, {force:true}); return; }
+  if (['Stop', 'Interrupt', 'SessionEnd'].includes(input.hook_event_name)) {
+    const lease = await currentSessionLease(input.session_id);
+    if (input.hook_event_name === 'Stop') {
+      if (activeListeners(lease).length) {
+        console.log(JSON.stringify({decision:'block', reason:
+          'Your Trace review is still open. If the user asked to stop, run trace-review stop-waiting and finish. Otherwise resume the original listener. If its tool handle is unavailable, run trace-review pending --json (uses CODEX_THREAD_ID), reply to each pending thread with trace-review reply, then wait again. Do not open a second viewer.'}));
+      } else console.log('{}');
+    } else {
+      stopListeners(lease);
+      if (input.hook_event_name === 'SessionEnd') await rm(path, {force:true});
+    }
+    return;
+  }
   if (input.hook_event_name !== 'SessionStart') return;
   await mkdir(sessionDirectory(), {recursive:true, mode:0o700});
   const ownerPid=agentOwner();

@@ -33,14 +33,14 @@ export async function fixture(id='javascript',{changed=true,commit=true}={}) {
  const cli=(...args)=>exec(process.execPath,[join(root,'bin/trace.mjs'),...args,'--repo',repo],{env,timeout:10000});
  const hook=async(event,sessionId='fixture-session',source='startup')=>{
   const child=spawn(process.execPath,[join(root,'plugins/trace/hooks/session.mjs')],{env,stdio:['pipe','pipe','pipe']});
-  let stderr='';child.stderr.on('data',d=>stderr+=d);child.stdout.resume();
-  const done=new Promise((ok,fail)=>{child.once('error',fail);child.once('close',code=>code===0?ok():fail(Error(stderr)));});
-  child.stdin.end(JSON.stringify({hook_event_name:event,session_id:sessionId,source}));await done;
+  let stderr='', stdout='';child.stderr.on('data',d=>stderr+=d);child.stdout.on('data',d=>stdout+=d);
+  const done=new Promise((ok,fail)=>{child.once('error',fail);child.once('close',code=>code===0?ok(stdout.trim()):fail(Error(stderr)));});
+  child.stdin.end(JSON.stringify({hook_event_name:event,session_id:sessionId,source}));return done;
  };
  const server=async(options={})=>{const app=await createTraceServer({repo,...options});cleanups.push(()=>app.close());return app;};
- const start=async({sessionId='fixture-session',lease=true,args=[]}={})=>{
+ const start=async({sessionId='fixture-session',lease=true,args=[],command='review'}={})=>{
   if(lease)await hook('SessionStart',sessionId);
-  const child=spawn(process.execPath,[join(root,'bin/trace.mjs'),'review','--repo',repo,'--wait','--json','--no-open',...(lease?['--session-id',sessionId]:[]),...args],{env,stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,[join(root,'bin/trace.mjs'),command,'--repo',repo,'--wait','--json','--no-open',...(lease?['--session-id',sessionId]:[]),...args],{env,stdio:['ignore','pipe','pipe']});
   let output='',stderr='';const events=[];let code;
   const exited=new Promise((ok,fail)=>{child.once('error',fail);child.once('close',value=>{code=value;ok(value);});});
   child.stderr.on('data',d=>stderr=(stderr+d).slice(-16000));
