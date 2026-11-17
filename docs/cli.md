@@ -91,6 +91,8 @@ trace-review reply --review REVIEW_ID --comment COMMENT_ID \
 
 Run this in the reviewed repository, or add `--repo PATH`. Use `--agent claude` for Claude Code. The body is plain text; `--body-file -` reads stdin. The command records a reply, not an instruction to start a model. IDs come from the submitted feedback JSON. Use `--comment review` for general instructions.
 
+In terminal Codex, a sandbox permission prompt may appear when saving the first reply. Trace identifies the replies directory for that review. After approval, the agent retries the same reply and resumes listening.
+
 Statuses: `addressed`, `needs_input`, `not_changed`, `note`. These are agent-reported outcomes, not proof that checks passed. The reviewer controls Resolve in the UI. Replies are stored as immutable files, so simultaneous replies cannot overwrite one another. The viewer polls for replies every 1.5 seconds without replacing the diff or moving the reading position.
 
 A follow-up preserves its original line, parent message and previous replies. Choose Review latest changes to discuss newly edited code.

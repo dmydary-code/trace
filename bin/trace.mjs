@@ -12,7 +12,7 @@ import {stopListeners} from '../plugins/trace/hooks/listeners.mjs';
 import {pendingFeedback} from '../lib/pending.mjs';
 import {browserFallback} from '../lib/browser-fallback.mjs';
 import {installAgents} from '../lib/install-agents.mjs';
-import {readReview, readSnapshot, addReply} from '../lib/reviews.mjs';
+import {readReview, readSnapshot, addReply, reviewDirectory} from '../lib/reviews.mjs';
 
 const root = process.env.TRACE_BUNDLE_HOME || dirname(dirname(fileURLToPath(import.meta.url)));
 const {version} = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -97,7 +97,13 @@ try {
       for await (const chunk of process.stdin) { size += chunk.length; if (size > 40000) throw new Error('Reply exceeds 10000 characters'); chunks.push(chunk); }
       body = Buffer.concat(chunks).toString('utf8');
     } else body = await readFile(options.bodyFile, 'utf8');
-    const reply = await addReply(gitDir, {...options, body});
+    const reply = await addReply(gitDir, {...options, body}).catch(error => {
+      if (error.code === 'EACCES' || error.code === 'EPERM') {
+        const directory = join(reviewDirectory(gitDir, options.reviewId), 'replies');
+        throw new Error(`Reply was not saved. Request write access to ${directory} and retry the same Trace reply. (${error.code})`);
+      }
+      throw error;
+    });
     if (options.json) emit(reply); else console.log(`Reply saved to comment ${reply.commentId} in review ${reply.reviewId}.`);
   } else if (command === 'doctor') {
     const tools = {};
