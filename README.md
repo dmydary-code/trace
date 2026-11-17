@@ -15,7 +15,7 @@ Local code review for **Codex and Claude Code**. Explore changes, leave line com
 - **Review commit by commit.** Open **Commits** and check **Viewed** in the diff or beside a commit in the timeline. Uncheck it to revisit the commit later. **Approve commit** records approval separately. The timeline stays on the right as you read the diff. On smaller screens, use the file sidebar button to open the file list. Select an adjacent commit to keep reading, or choose **Overall** for the combined changes.
 - **Talk to your agent.** Send questions or requests on the overall diff, a commit or a specific line. Use **Reply** to continue in the same thread.
 
-Graph currently analyzes relative JavaScript/TypeScript dependencies. Find Usages matches identifier names within one side of the diff, so unrelated same-name symbols can appear together. [Graph details](docs/graph.md).
+Graph appears when the current diff includes JavaScript or TypeScript source. Other diffs open in **Files**. Find Usages matches identifier names within one side of the diff, so unrelated same-name symbols can appear together. [Graph details](docs/graph.md).
 
 Open **Appearance** in the header and select **New Year lights** to decorate the Trace tree and header in either color scheme.
 

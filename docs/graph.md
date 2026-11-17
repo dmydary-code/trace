@@ -1,6 +1,6 @@
 # Graph review
 
-Choose **Graph** to see changed files and dependencies. Select a node to reveal its unchanged neighbors and open its diff on the right. Unchanged and deleted files show source (the base version for deleted files). Renames remain one node. The sidebar toggle collapses the file list completely.
+Trace offers **Graph** when the current diff includes a JavaScript or TypeScript file, including JSX, TSX and module variants. A deletion or rename from a supported path also qualifies. In a mixed repository this follows the selected commit or comparison. Diffs containing only other files open in **Files**. Select a node to reveal its unchanged neighbors and open its diff on the right. Unchanged and deleted files show source (the base version for deleted files). Renames remain one node. The sidebar toggle collapses the file list completely.
 
 Node colors identify code, unit tests, integration tests, E2E tests and unclassified tests. Brightness indicates diff membership, not whether the dependency itself changed. Edge badges + and − compare base and current dependencies. Solid edges show imports, dashed edges show calls through imported bindings, dotted edges show type-only imports. Test edges use the source test color.
 

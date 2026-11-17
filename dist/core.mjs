@@ -1,3 +1,7 @@
+export function isGraphSource(path) {
+  return /\.[cm]?[jt]sx?$/.test(path);
+}
+
 export const profiles = {
  backend: {label:'Backend', layers:['Contract','Implementation','Consumers','Tests'],stacks:{nestjs:'TypeScript · NestJS',fastapi:'Python · FastAPI',spring:'Java · Spring'},patterns:{layered:'Layered services',clean:'Clean / Hexagonal',events:'Event-driven'}},
  frontend: {label:'Frontend', layers:['Data & API','State & logic','Components & styles','Pages & navigation','Tests'],stacks:{react:'React',vue:'Vue',angular:'Angular'},patterns:{feature:'Feature-based'}},

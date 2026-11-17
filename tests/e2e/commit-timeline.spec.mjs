@@ -27,6 +27,7 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   const rows = page.locator('#commit-list a');
   await expect(rows).toHaveCount(2);
   await expect(page.locator('#title')).toHaveText('Include shipping');
+  await expect(page.locator('#route-mode')).toBeVisible();
   await expectTimelineOnRight(page);
   const files = await page.locator('#file-sidebar').boundingBox();
   expect(files.x + files.width).toBeCloseTo((await page.locator('main').boundingBox()).x, 0);
@@ -43,6 +44,7 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   await expect(rows.last()).toHaveAttribute('aria-current', 'page');
   await expect(rows.last().locator('code')).toHaveText(sha.slice(0, 8));
   await expect(page.locator('#commit-body')).toHaveText('Use the billing currency.');
+  await expect(page.locator('#route-mode')).toBeHidden();
   await expect(page.locator('#feed')).toContainText('EUR');
   await expect(page.locator('#feed')).not.toContainText('USD');
   await addComment(page, 'Why EUR?');
@@ -65,6 +67,7 @@ test('approve one commit, discuss another twice, return to Overall', async ({pag
   await expect(page.locator('.thread-history')).toContainText('billing account');
   await page.locator('#overall-scope').click();
   await expect(page.locator('#title')).toHaveText('Overall changes');
+  await expect(page.locator('#route-mode')).toBeVisible();
   await expect(page.locator('#timeline')).toBeHidden();
   await expect(page.locator('#feed')).toContainText('USD');
   await expect(page.locator('#feed')).toContainText(f.project.path);

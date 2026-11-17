@@ -1,14 +1,17 @@
 # Graph dependency discovery for additional languages
 
-Status: deferred product task. On 2026-11-07 the reviewer selected preservation of existing Graph language support for the refactor. This task records future requirements; it does not authorize implementation or create a release commitment.
+The viewer offers Graph for changes that the JavaScript/TypeScript analyzer recognizes. The work below is the backlog for broader stack support. Each stack can ship independently once its dependency fixtures pass.
 
-Current Graph dependency discovery covers relative JavaScript/TypeScript imports and heuristic call/type evidence. The current [refactor test plan](refactor-test-plan.md) checks nodes and file previews for all ten requested languages, but dependency discovery remains limited to JS/TS.
+## Delivery plan
 
-Extend dependency discovery to Java, Kotlin, Go, Python, Rust, C#, Swift and C++ in a separate change. First agree language-specific dependency semantics, including package/module versus file targets, relation kinds, and explicit limitations. Preserve JS/TS behavior and diff loading independence.
+1. **JS/TS and web frameworks.** Preserve relative module discovery. Add fixture pairs for package aliases and workspace imports in Node, NestJS, React, Angular and Vue projects. Specify Angular template links and Vue single-file component imports separately. Enable a new file format only after its analyzer resolves a local dependency end to end.
+2. **Backend and native languages.** Implement the contracts below for Java/Spring, Kotlin/Android, Go, Python/FastAPI, Rust, C#, Swift/iOS and C++. Start each implementation with the smallest local dependency its compiler or module system can identify unambiguously.
+3. **Dart and Flutter.** Resolve relative imports and same-package `package:` imports using the package name and `lib/` root from `pubspec.yaml`. Include fixtures for external packages, exports and deleted files.
+4. **Enable each stack.** Extend the shared source-file check alongside its analyzer. Exercise supported-only, unsupported-only and mixed diffs, switching commits, saved Graph preferences and file review in both browsers.
 
 ## Proposed language dependency contracts
 
-These are proposed minimum acceptance cases for a later Graph expansion. They are not implemented or verified today and are explicitly excluded from the current refactor. For each language use a single unambiguous local target, then add/remove the relation and verify its marker. Framework-specific routing, reflection, generated code and whole-program virtual dispatch remain outside this minimum.
+These are proposed minimum acceptance cases for a later Graph expansion. For each language use a single unambiguous local target, then add/remove the relation and verify its marker. Framework-specific routing, reflection, generated code and whole-program virtual dispatch remain outside this minimum.
 
 | ID | Language | Minimum independently specified relationship |
 | --- | --- | --- |
@@ -21,7 +24,7 @@ These are proposed minimum acceptance cases for a later Graph expansion. They ar
 | GX-07 | Swift | Explicit reference to a unique type in the same module: Uses type to its declaration; `import Foundation` excluded from local-file dependencies. |
 | GX-08 | C++ | Quoted local `#include` resolves to the header: Imports. Calls/types require a separate parser contract; macros and conditional includes are not silently flattened. |
 
-For Calls / Uses type across all ten languages, define each language's resolution rules and expected examples before implementation. Passing an Imports/include-only case is not equivalent to supporting all three relation kinds.
+For Calls / Uses type across languages, define each language's resolution rules and expected examples before implementation. Passing an Imports/include-only case is not equivalent to supporting all three relation kinds.
 
 ## Implementation acceptance
 
@@ -31,4 +34,4 @@ For Calls / Uses type across all ten languages, define each language's resolutio
 - Define and test test-file classification separately from dependency detection.
 - Reuse the Graph interaction suite for context expansion, stable positions, preview versions and selection.
 - Report unsupported syntax explicitly; do not equate a passing Imports case with semantic Calls or Uses type support.
-- Keep the current refactor and its release independent of this task.
+- Include representative mixed-language repositories in the regression suite as each analyzer ships.

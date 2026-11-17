@@ -32,6 +32,30 @@ test('New Year lights are optional, persist on reload and stay steadily lit',asy
  await expect(garland).toBeHidden();await expect(lights).toBeHidden();
  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
 });
+test('Graph follows the active diff and restores the preferred mode for mixed changes', async ({page, app, f}) => {
+ const graphRequests = [];
+ page.on('request', request => {
+   if (new URL(request.url()).pathname === '/api/graph') graphRequests.push(request.url());
+ });
+ await load(page, app);
+ await graph(page);
+ const initialRequests = graphRequests.length;
+
+ await f.put(f.project.path, f.project.before);
+ await f.put('backend/pricing.py', 'price = 1');
+ await page.reload();
+ await expect(page.locator('.file-card')).toContainText('backend/pricing.py');
+ await expect(page.locator('#route-mode')).toBeHidden();
+ await expect(page.locator('.graph-help')).toBeHidden();
+ expect(graphRequests).toHaveLength(initialRequests);
+
+ await f.put(f.project.path, f.project.after);
+ await page.getByRole('button', {name:'Refresh diff'}).click();
+ await expect(page.locator('#route-mode')).toHaveAttribute('aria-pressed', 'true');
+ await expect(page.locator('.graph-svg')).toBeVisible();
+ await page.locator('#files-mode').click();
+ await expect(page.locator('.file-card')).toHaveCount(2);
+});
 test('UI-04/05/07 Find Usages matches same-side identifiers, highlights and navigates',async({page,app})=>{
  await load(page,app);const symbol=page.locator('.line.add .diff-symbol[data-symbol="subtotal"]').first();await expect(symbol).toHaveCSS('cursor','pointer');await symbol.click();await expect(page.locator('#diff-usages')).toBeVisible();await expect(page.locator('.usage-match')).toHaveCount(1);await expect(page.locator('.usage-token-match')).toHaveCount(1);
  const result=page.locator('[data-usage-result]').last();await result.click();await expect(page.locator('.usage-highlight')).toBeVisible();await page.locator('[data-close-usages]').click();await expect(page.locator('.usage-token-match')).toHaveCount(0);
