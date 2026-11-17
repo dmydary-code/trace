@@ -4,7 +4,7 @@ import {reviewPrompt, compactFileTree, fileTreeOrder, isGraphSource} from './cor
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
-const state = {theme: 'dark', mode: 'files', reviews: {}, ...saved};
+const state = {theme: 'dark', mode: 'files', reviews: {}, newYear: true, ...saved};
 if (state.mode === 'route') state.mode = 'graph';
 const local = document.documentElement.dataset.traceLocal === 'true';
 let loadGeneration = 0;

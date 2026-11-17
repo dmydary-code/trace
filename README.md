@@ -2,7 +2,7 @@
 
 Local code review for **Codex and Claude Code**. Explore changes, leave line comments, and get agent replies in the same threads.
 
-![Trace: explore Graph, inspect unchanged tests, find usages in the diff, and send feedback](docs/assets/graph-review.gif)
+![Trace with New Year lights: explore Graph, inspect unchanged tests, find usages in the diff, and send feedback](docs/assets/graph-review.gif)
 
 ## Review changes in context
 
@@ -18,7 +18,7 @@ Local code review for **Codex and Claude Code**. Explore changes, leave line com
 
 Graph appears when the current diff includes JavaScript or TypeScript source. Other diffs open in **Files**. Find Usages matches identifier names within one side of the diff, so unrelated same-name symbols can appear together. [Graph details](docs/graph.md).
 
-Open **Appearance** in the header and select **New Year lights** to decorate the Trace tree and header in either color scheme.
+New Year lights decorate the Trace tree and header by default in either color scheme. Toggle **New Year lights** in **Appearance** to save your preference.
 
 ## Install
 
