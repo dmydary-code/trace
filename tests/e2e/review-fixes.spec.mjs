@@ -58,3 +58,47 @@ test('header opens an original thread and its reply after the file changes', asy
  await expect(page.locator('.comment-current')).toBeInViewport();
  await expect(page.locator('.comment-current')).toBeFocused();
 });
+
+test('Approve saves the displayed revision, ends the listener and releases only its port', async ({page, f, app}) => {
+ const run = await f.start({args: ['--listen']});
+ await load(page, {url: run.ready.url});
+ const approve = page.getByRole('button', {name: 'Approve', exact: true});
+ await f.put(f.project.path, f.project.fixed);
+ await approve.click();
+ await expect(page.locator('#toast')).toContainText('Code has changed');
+ expect(run.events.filter(event => event.event === 'feedback')).toHaveLength(0);
+
+ await page.locator('#refresh').click();
+ await expect(page.locator('.line.add')).toContainText('cart.shipping');
+ const revision = (await session({url: run.ready.url})).revision;
+ await approve.click();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+ expect(await run.exited).toBe(0);
+ expect(run.events.filter(event => event.event === 'feedback')).toMatchObject([{outcome: 'approved', revision}]);
+ const saved = JSON.parse((await f.cli('feedback', '--json')).stdout);
+ expect(saved).toMatchObject({outcome: 'approved', revision, sessionId: run.ready.sessionId});
+ await freePort(run.ready.url);
+ expect((await session(app)).sessionId).toBe(app.sessionId);
+});
+
+test('Approve closes a detached viewer after feedback and preserves the original round', async ({page, f}) => {
+ const run = await f.start();
+ await page.setViewportSize({width: 360, height: 780});
+ await load(page, {url: run.ready.url});
+ await addComment(page, 'Please review the price.');
+ await send(page);
+ expect(await run.exited).toBe(0);
+ const original = run.events.find(event => event.event === 'feedback');
+ await page.getByRole('button', {name: 'Approve', exact: true}).click();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+ await eventually(() => fetch(run.ready.url).then(() => false, () => true));
+ await freePort(run.ready.url);
+ await eventually(() => {
+   try { process.kill(run.ready.viewerPid, 0); return false; }
+   catch (error) { return error.code === 'ESRCH'; }
+ }, 'Detached viewer process is still running');
+ const approval = JSON.parse((await f.cli('feedback', '--json')).stdout);
+ expect(approval).toMatchObject({outcome: 'approved', previousId: original.id});
+ const saved = JSON.parse((await f.cli('feedback', '--review', original.id, '--json')).stdout);
+ expect(saved.comments[0].body).toBe('Please review the price.');
+});

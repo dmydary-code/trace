@@ -156,6 +156,7 @@ try {
       viewer.send(options);
     } else {
       const app = await createTraceServer(options);
+      app.server.once('close', () => cancelBrowserFallback());
       app.events.on('client-ready',()=>cancelBrowserFallback());
       app.events.on('review', review => showFeedback({event: 'feedback', ...review}));
       process.once('SIGINT', () => app.close()); process.once('SIGTERM', () => app.close());

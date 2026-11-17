@@ -18,6 +18,7 @@ const scopeOf = () => session?.scope || session?.submittedReview?.scope || 'chan
 const requestUrl = (path, params = viewParams) => path + (params.size ? '?' + params : '');
 let activeCommentId=null, clientHeartbeat=null;
 let diffLoading=false, graphLoading=null, graphError=null;
+let approvingReview = false, viewerFinished = false;
 let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
@@ -144,7 +145,7 @@ function syncSubmitted(data) {
   $('#instruction').disabled = true;
   $('#refresh').hidden = true;
   $('#review-status').hidden = false;
-  $('#review-status-text').textContent = data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. You can reply here or start another message.';
+  $('#review-status-text').textContent = data.outcome === 'approved' ? 'Review approved.' : data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. You can reply here or start another message.';
   $('#reply-connection').textContent = 'Agent replies update automatically.';
   $('#general-thread').hidden = !data.instruction;
   $('#general-instruction').innerHTML = priorMessages() + esc(data.instruction || '');
@@ -190,7 +191,7 @@ function renderFeed() {
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
 function counts() { updateCommentNavigation(); $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', !inGraphMode()); $('#route-mode').setAttribute('aria-pressed', inGraphMode()); $('#route-info').hidden = true; $('#review').disabled = !session || diffLoading || sendingReview; $('#review').setAttribute('aria-busy',String(sendingReview)); $('#review-label').textContent=sendingReview?'Sending…':submitted?'Review sent':'Send to agent'; $('#review-icon').textContent=submitted?'✓':'↗'; tree(); renderFeed(); counts(); completionButtons(); }
+function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', !inGraphMode()); $('#route-mode').setAttribute('aria-pressed', inGraphMode()); $('#route-info').hidden = true; $('#review').disabled = !session || diffLoading || sendingReview || approvingReview; $('#review').setAttribute('aria-busy',String(sendingReview)); $('#review-label').textContent=sendingReview?'Sending…':submitted?'Review sent':'Send to agent'; $('#review-icon').textContent=submitted?'✓':'↗'; tree(); renderFeed(); counts(); completionButtons(); }
 function jump(id) { if(inGraphMode()) { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -243,6 +244,36 @@ function openReview() {
   $('#send').textContent = session.agent ? 'Send to Codex ↗' : 'Send to agent ↗'; dialogButtons(); $('#handoff').showModal();
 };
 $('#review').onclick = openReview;
+$('#review-finished').addEventListener('cancel', event => event.preventDefault());
+$('#approve-review').onclick = async () => {
+  if (!session || diffLoading || sendingReview || approvingReview || viewerFinished) return;
+  const draft = review();
+  const hasDraft = !submitted && (draft.comments.some(comment => !comment.resolved)
+    || draft.instruction.trim() || Object.values(draft.drafts).some(text => text.trim()));
+  if (hasDraft && !confirm('Approve and close this review without sending your draft feedback?')) return;
+  approvingReview = true;
+  render();
+  try {
+    const response = await fetch(requestUrl('/api/reviews', new URLSearchParams({scope: scopeOf()})), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Trace-Token': session.token},
+      body: JSON.stringify({revision: session.revision, previousId: session.rounds?.at(-1) || null,
+        outcome: 'approved', comments: [], closeViewer: true})
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    viewerFinished = true;
+    clearInterval(replyTimer);
+    clearInterval(jobTimer);
+    clearInterval(clientHeartbeat);
+    $('#review-finished').showModal();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    approvingReview = false;
+    if (!viewerFinished) render();
+  }
+};
 $('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
@@ -297,6 +328,7 @@ async function loadSession(params = viewParams) {
   diffLoading=true;graphError=null;
   updateGraphAvailability([]);
   $('#review').disabled = true;
+  $('#approve-review').disabled = true;
   $('#commit-approve').disabled = true;
   $('#commit-viewed').disabled = true;
   renderFeed();
@@ -538,6 +570,8 @@ function renderGraph() {
 render(); if (local) loadSession();
 
 function completionButtons() {
+  $('#approve-review').disabled = !session || diffLoading || sendingReview || approvingReview || viewerFinished;
+
   const commit = session?.commit;
   const browsing = !$('#timeline').hidden;
   $('#timeline-open').setAttribute('aria-pressed', String(browsing));
@@ -854,6 +888,6 @@ function navigateComment(direction) {
 }
 $('#previous-comment').onclick=()=>navigateComment(-1);
 $('#next-comment').onclick=()=>navigateComment(1);
-function acknowledgeViewer(){if(session)fetch('/api/client-ready',{method:'POST',headers:{'X-Trace-Token':session.token}}).catch(()=>{});}
+function acknowledgeViewer(){if(session && !viewerFinished)fetch('/api/client-ready',{method:'POST',headers:{'X-Trace-Token':session.token}}).catch(()=>{});}
 window.addEventListener('pageshow',acknowledgeViewer);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)acknowledgeViewer();});

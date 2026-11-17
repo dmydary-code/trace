@@ -186,7 +186,9 @@ export async function createTraceServer(options = {}) {
           const current = scope ? await scopeSnapshot(scope, {compose: true, round: parent?.reviewId}) : await snapshot();
           if (input.revision !== current.revision) { running = false; return json(res, 409, {error: 'Code has changed. Refresh the diff and review your comments.'}); }
           const outcome = input.outcome || 'changes_requested';
-          if ((scope && outcome === 'approved') || !['changes_requested', 'approved', 'cancelled'].includes(outcome)) throw new Error('Invalid review outcome');
+          const closeViewer = input.closeViewer === true;
+          if (closeViewer && outcome !== 'approved') throw new Error('Closing the viewer requires approval');
+          if ((scope && outcome === 'approved' && !closeViewer) || !['changes_requested', 'approved', 'cancelled'].includes(outcome)) throw new Error('Invalid review outcome');
           if (!Array.isArray(input.comments) || input.comments.length > 100) throw new Error('Invalid comments');
           const instruction = input.instruction || '';
           if (typeof instruction !== 'string' || instruction.length > 10000) throw new Error('Invalid instructions');
@@ -232,8 +234,16 @@ export async function createTraceServer(options = {}) {
             child.on('close', async code => { if (job.status === 'failed') return; job.status = code === 0 ? 'succeeded' : 'failed'; try { job.output = await readFile(join(dir, 'result.txt'), 'utf8'); } catch {} running = false; });
             return json(res, 202, {id, status: 'running', review: result});
           }
-          running = false;
+          running = closeViewer;
           events.emit('review', result);
+          if (closeViewer) {
+            // Finish the approval response before releasing this viewer's socket.
+            if (res.destroyed) void close();
+            else {
+              res.setHeader('Connection', 'close');
+              res.once('close', close);
+            }
+          }
           return json(res, 201, {id, status: 'submitted', outcome, reviewPath: result.reviewPath, review: result});
         } catch (err) { running = false; throw err; }
       }
@@ -248,7 +258,15 @@ export async function createTraceServer(options = {}) {
   });
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(options.port ?? 0, '127.0.0.1', ok); });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return {url: origin, repository, events, server, sessionId, close: () => new Promise((ok, fail) => { server.close(err => err ? fail(err) : ok()); server.closeAllConnections(); })};
+  let closing;
+  function close() {
+    closing ??= new Promise((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    });
+    return closing;
+  }
+  return {url: origin, repository, events, server, sessionId, close};
 }
 
 // Backwards-compatible entry point; the installed command lives in bin/trace.mjs.
