@@ -11,11 +11,11 @@ test('UI-02/03 sidebar, theme, search and sticky toolbar persist without changin
  await page.getByLabel('Find a file').fill('pricing');await expect(page.locator('.file-card')).toHaveCount(1);await page.getByLabel('Find a file').fill('');await expect(page.locator('.file-card')).toHaveCount(2);await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme','light');await expect(page.locator('#sidebar-resizer')).toHaveAttribute('aria-valuenow',width);await expect(page.locator('.file-card .thread')).toContainText('Persistent feedback');
  await page.locator('#toggle-sidebar').click();await expect(page.locator('body')).toHaveClass(/sidebar-collapsed/);await page.evaluate(()=>window.scrollTo(0,400));await expect.poll(()=>page.locator('main>.toolbar').evaluate(el=>el.getBoundingClientRect().top)).toBeLessThan(75);expect(await page.locator('main>.toolbar').evaluate(el=>el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(65);
 });
-test('New Year lights are optional, persist on reload and stay steadily lit',async({page,app})=>{
+test('New Year lights default on, preserve the saved choice and stay steadily lit',async({page,app})=>{
  await load(page,app);
  const lights=page.locator('.tree-lights'), garland=page.locator('.new-year-garland');
  const appearance=page.getByRole('button',{name:'Appearance',exact:true});
- await expect(garland).toBeHidden();
+ await expect(garland).toBeVisible();
  await addComment(page,'Check the header navigation');
  await appearance.click();await page.getByLabel('New Year lights').check();
  await page.getByLabel('Color scheme').selectOption('light');await page.reload();
@@ -29,6 +29,8 @@ test('New Year lights are optional, persist on reload and stay steadily lit',asy
  expect(strand.y+strand.height).toBeLessThanOrEqual(button.y);
  await page.locator('#comment-position').click();await expect(page.locator('#comment-menu')).toBeVisible();
  await page.keyboard.press('Escape');await appearance.click();await page.getByLabel('New Year lights').uncheck();
+ await expect(garland).toBeHidden();await expect(lights).toBeHidden();
+ await page.reload();
  await expect(garland).toBeHidden();await expect(lights).toBeHidden();
  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
 });
