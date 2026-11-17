@@ -102,3 +102,82 @@ test('Approve closes a detached viewer after feedback and preserves the original
  const saved = JSON.parse((await f.cli('feedback', '--review', original.id, '--json')).stdout);
  expect(saved.comments[0].body).toBe('Please review the price.');
 });
+
+test('Approve queues a single approval while the first empty diff is loading', async ({page, f}) => {
+ await f.git('checkout', '--', f.project.path);
+ const run = await f.start({args: ['--listen']});
+ let release;
+ const gate = new Promise(resolve => { release = resolve; });
+ await page.route('**/api/session', async route => { await gate; await route.continue(); });
+ await page.goto(run.ready.url);
+ const approve = page.locator('#approve-review');
+ await approve.click();
+ await approve.click();
+ await expect(approve).toHaveAttribute('aria-busy', 'true');
+ release();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+ expect(await run.exited).toBe(0);
+ expect(run.events.filter(e => e.outcome === 'approved')).toHaveLength(1);
+});
+
+test('Approve inside the send dialog waits for the pending question to be saved', async ({page, f}) => {
+ const run = await f.start({args: ['--listen']});
+ await load(page, {url: run.ready.url});
+ await addComment(page, 'Please check shipping.');
+ let release;
+ const gate = new Promise(resolve => { release = resolve; });
+ await page.route('**/api/reviews?*', async route => { await gate; await route.continue(); });
+ await page.locator('#review').click();
+ await page.locator('#send').click();
+ await page.getByRole('dialog').getByRole('button', {name: 'Approve', exact: true}).click();
+ release();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+ expect(await run.exited).toBe(0);
+ const feedback = run.events.filter(e => e.event === 'feedback');
+ expect(feedback.map(e => e.outcome)).toEqual(['changes_requested', 'approved']);
+ expect(feedback[1].previousId).toBe(feedback[0].id);
+});
+
+test('a standalone HTML file explains how to open the live review when approving', async ({page}) => {
+ await page.goto(new URL('../../dist/index.html', import.meta.url).href);
+ await page.locator('#approve-review').click();
+ await expect(page.locator('#approve-help')).toBeVisible();
+ await expect(page.locator('#approve-help')).toContainText('trace-review');
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toHaveCount(0);
+});
+
+test('Approve works on a commit and again when reopening its saved approval', async ({page, f}) => {
+ await f.git('add', f.project.path);
+ await f.git('commit', '-m', 'Adjust shipping');
+ const sha = await f.git('rev-parse', 'HEAD');
+ const original = await f.server();
+ await page.goto(original.url + '?scope=' + sha);
+ await expect(page.locator('#title')).toHaveText('Adjust shipping');
+ await page.locator('#approve-review').click();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+ const saved = JSON.parse((await f.cli('feedback', '--json')).stdout);
+ expect(saved.scope).toBe(sha);
+ const reopened = await f.server({reviewId: saved.id});
+ await page.goto(reopened.url);
+ await expect(page.locator('#title')).toHaveText('Adjust shipping');
+ await page.locator('#approve-review').click();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+ expect(JSON.parse((await f.cli('feedback', '--json')).stdout).previousId).toBe(saved.id);
+});
+
+test('Approve in a pending thread preserves an unsent reply when the reviewer cancels', async ({page, app}) => {
+ await load(page, app);
+ await addComment(page, 'Does the price include shipping?');
+ await send(page);
+ await page.locator('[data-followup]').click();
+ const dialog = page.getByRole('dialog', {name: 'Reply in thread'});
+ const reply = dialog.getByRole('textbox');
+ await reply.fill('Here is one more question.');
+ const approve = dialog.getByRole('button', {name: 'Approve', exact: true});
+ page.once('dialog', prompt => prompt.dismiss());
+ await approve.click();
+ await expect(reply).toHaveValue('Here is one more question.');
+ page.once('dialog', prompt => prompt.accept());
+ await approve.click();
+ await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+});

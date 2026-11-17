@@ -14,3 +14,26 @@ for(const reason of ['Provider connection lost','Authentication expired'])test('
  const result=await eventually(async()=>{const j=await(await fetch(app.url+'/api/jobs/'+job.id)).json();return j.status==='failed'?j:null;});assert.match(result.output,new RegExp(reason));const saved=(await session(app)).submittedReview;assert.equal(saved.instruction,'Include shipping');assert.equal(saved.replies.length,0);assert.equal(saved.completion,null);
  child.kill('SIGTERM');await exited;await freePort(ready.url);
 });
+
+test('Approve releases the viewer port while an optional agent job is still running', async t => {
+ const f = await fixture();
+ t.after(() => f.dispose());
+ const bin = join(f.dir, 'bin');
+ await mkdir(bin);
+ await writeFile(join(bin, 'codex'), '#!' + process.execPath + '\nsetTimeout(() => {}, 2500);\n', {mode: 0o755});
+ const child = spawn(process.execPath, [join(root, 'bin/trace.mjs'), '--repo', f.repo, '--agent', 'codex', '--json', '--no-open'], {
+   env: {...f.env, PATH: bin + ':' + f.env.PATH}, stdio: ['ignore', 'pipe', 'ignore']
+ });
+ t.after(() => child.kill('SIGTERM'));
+ let output = '';
+ child.stdout.on('data', chunk => { output += chunk; });
+ const app = await eventually(() => output.includes('\n') && JSON.parse(output.split('\n')[0]));
+ const s = await session(app);
+ const response = await post(app, s, '/api/reviews?scope=changes', {instruction: 'Check shipping'});
+ assert.equal(response.status, 202);
+ const {id} = await response.json();
+ const approval = await post(app, s, '/api/reviews?scope=changes', {previousId: id, outcome: 'approved', closeViewer: true});
+ assert.equal(approval.status, 201);
+ await eventually(() => fetch(app.url).then(() => false, () => true));
+ await freePort(app.url);
+});

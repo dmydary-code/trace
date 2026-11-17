@@ -168,3 +168,6 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
 [data-new-year] .new-year-garland {display:block; position:absolute; inset:0 0 auto; height:10px; overflow:hidden}
 [data-new-year] .tree-lights {display:inline}
 [data-new-year] .logo svg path:first-child {fill:color-mix(in srgb,var(--mint) 18%,var(--bg))}
+
+#approve-help{max-width:min(30rem,calc(100vw - 2rem));padding:16px 20px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text)}
+#approve-help p{margin:0}

@@ -18,7 +18,7 @@ const scopeOf = () => session?.scope || session?.submittedReview?.scope || 'chan
 const requestUrl = (path, params = viewParams) => path + (params.size ? '?' + params : '');
 let activeCommentId=null, clientHeartbeat=null;
 let diffLoading=false, graphLoading=null, graphError=null;
-let approvingReview = false, viewerFinished = false;
+let approvalQueued = false, approvingReview = false, viewerFinished = false, diffLoadFailed = false;
 let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
 const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
@@ -245,12 +245,23 @@ function openReview() {
 };
 $('#review').onclick = openReview;
 $('#review-finished').addEventListener('cancel', event => event.preventDefault());
-$('#approve-review').onclick = async () => {
-  if (!session || diffLoading || sendingReview || approvingReview || viewerFinished) return;
+async function approveReview() {
+  if (approvingReview || viewerFinished) return;
+  if (!session || diffLoading || diffLoadFailed || sendingReview) {
+    approvalQueued = true;
+    completionButtons();
+    toast(sendingReview ? 'Approval queued until your message is saved.' : 'Approval queued while the diff loads.');
+    if (!diffLoading && (!session || diffLoadFailed)) void loadSession();
+    return;
+  }
+  approvalQueued = false;
   const draft = review();
-  const hasDraft = !submitted && (draft.comments.some(comment => !comment.resolved)
-    || draft.instruction.trim() || Object.values(draft.drafts).some(text => text.trim()));
-  if (hasDraft && !confirm('Approve and close this review without sending your draft feedback?')) return;
+  const hasDraft = Object.values(draft.drafts).some(text => text.trim())
+    || (!submitted && (draft.comments.some(comment => !comment.resolved) || draft.instruction.trim()));
+  if (hasDraft && !confirm('Approve and close this review without sending your draft feedback?')) {
+    completionButtons();
+    return;
+  }
   approvingReview = true;
   render();
   try {
@@ -261,19 +272,37 @@ $('#approve-review').onclick = async () => {
         outcome: 'approved', comments: [], closeViewer: true})
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error);
+    if (!response.ok) {
+      if (response.status === 409 && !session.commit) {
+        $('#handoff').close();
+        $('#followup').close();
+        await navigate(scopeOf(), {compose: '1'});
+      }
+      throw new Error(result.error);
+    }
     viewerFinished = true;
     clearInterval(replyTimer);
     clearInterval(jobTimer);
     clearInterval(clientHeartbeat);
+    $('#handoff').close();
+    $('#followup').close();
     $('#review-finished').showModal();
   } catch (error) {
     toast(error.message);
+    if ($('#handoff').open) $('#job-state').textContent = error.message;
+    if ($('#followup').open) $('#reply-error').textContent = error.message;
   } finally {
     approvingReview = false;
     if (!viewerFinished) render();
   }
-};
+}
+if (local) {
+  const headerButton = $('#approve-review');
+  approvalQueued = $('#approve-help').matches(':popover-open');
+  $('#approve-help').hidePopover();
+  headerButton.removeAttribute('popovertarget');
+  for (const button of document.querySelectorAll('[data-approve-review]')) button.onclick = approveReview;
+}
 $('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
@@ -296,7 +325,7 @@ function matchesSubmission(review,payload){
  return review&&review.sessionId===session.sessionId&&review.revision===payload.revision&&review.outcome===payload.outcome&&(review.instruction||'')===payload.instruction&&review.comments.length===payload.comments.length&&review.comments.every((c,i)=>c.id===payload.comments[i].id&&c.body===payload.comments[i].body);
 }
 async function send(outcome) {
- if(sendingReview||submitted)return;
+ if(sendingReview || submitted || approvingReview || approvalQueued || viewerFinished)return;
  const payload=packet(outcome);let rejected=false;
  sendingReview=true;sendingCommentIds=new Set(payload.comments.map(c=>c.id));
  $('#instruction').disabled=true;render();$('#job-state').textContent='Sending review…';dialogButtons();
@@ -318,6 +347,8 @@ async function send(outcome) {
 $('#send').onclick = () => send('changes_requested'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession(params = viewParams) {
   const generation = ++loadGeneration;
+  diffLoading = true;
+  diffLoadFailed = false;
   const previousScope = scopeOf();
   const requested = params.get('scope');
   if (isCommitScope(requested)) {
@@ -325,10 +356,9 @@ async function loadSession(params = viewParams) {
   } else {
     hideTimeline();
   }
-  diffLoading=true;graphError=null;
+  graphError=null;
   updateGraphAvailability([]);
   $('#review').disabled = true;
-  $('#approve-review').disabled = true;
   $('#commit-approve').disabled = true;
   $('#commit-viewed').disabled = true;
   renderFeed();
@@ -336,7 +366,7 @@ async function loadSession(params = viewParams) {
     const res = await fetch(requestUrl('/api/session', params)); if (!res.ok) { const error = await res.json(); throw new Error(error.error || 'Local server unavailable'); }
     const next = await res.json();
     if (generation !== loadGeneration) return;
-    if (!next.scope && next.submittedReview) {
+    if (!requested && next.submittedReview) {
       return loadSession(new URLSearchParams({scope:next.submittedReview.scope || 'changes', round:next.submittedReview.id}));
     }
     viewParams = params;
@@ -368,7 +398,15 @@ async function loadSession(params = viewParams) {
     }
     diffLoading=false;render();
     acknowledgeViewer();clearInterval(clientHeartbeat);clientHeartbeat=setInterval(acknowledgeViewer,session.viewerHeartbeatMs||5000);
-  } catch (err) { if (generation !== loadGeneration) return; diffLoading=false;$('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`; toast(err.message); }
+  } catch (err) {
+    if (generation !== loadGeneration) return;
+    diffLoading = false;
+    diffLoadFailed = true;
+    approvalQueued = false;
+    completionButtons();
+    $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`;
+    toast(err.message);
+  }
 }
 $('#refresh').onclick = () => {
   if (session?.commit && !$('#timeline').hidden) openTimeline(false);
@@ -570,7 +608,12 @@ function renderGraph() {
 render(); if (local) loadSession();
 
 function completionButtons() {
-  $('#approve-review').disabled = !session || diffLoading || sendingReview || approvingReview || viewerFinished;
+  for (const button of document.querySelectorAll('[data-approve-review]')) {
+    button.setAttribute('aria-busy', String(approvalQueued || approvingReview));
+  }
+  if (approvalQueued && session && !diffLoading && !sendingReview) {
+    queueMicrotask(() => { if (approvalQueued && !diffLoading && !sendingReview) void approveReview(); });
+  }
 
   const commit = session?.commit;
   const browsing = !$('#timeline').hidden;
@@ -602,12 +645,16 @@ function setLocation(params, replace = false) {
 }
 async function navigate(scope, details = {}) {
   if (sendingReview) return;
+  approvalQueued = false;
   const params = new URLSearchParams({scope, ...details});
   setLocation(params);
   await loadSession(params);
   window.scrollTo(0, 0);
 }
-window.addEventListener('popstate', () => loadSession(new URLSearchParams(location.search)));
+window.addEventListener('popstate', () => {
+  approvalQueued = false;
+  loadSession(new URLSearchParams(location.search));
+});
 $('#working-scope').onclick = () => navigate('changes');
 $('#overall-scope').onclick = () => navigate('overall');
 $('#verify-latest').onclick = async () => {
@@ -762,7 +809,7 @@ $('#followup textarea').oninput = e => { review().drafts['reply:' + replyTarget.
 $('#followup form').onsubmit = async e => {
   e.preventDefault();
   const message = $('#followup textarea').value.trim();
-  if (!message || sendingReview) return;
+  if (!message || sendingReview || approvingReview || approvalQueued || viewerFinished) return;
   const anchor = activeReview.comments.find(c => c.id === replyTarget.commentId);
   const payload = {...packet(), replyTo: replyTarget, instruction: anchor ? '' : message,
     comments: anchor ? [{...anchor, id: crypto.randomUUID(), body:message}] : []};

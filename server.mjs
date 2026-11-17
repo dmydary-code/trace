@@ -39,7 +39,7 @@ export async function createTraceServer(options = {}) {
   const token = randomBytes(24).toString('hex'), events = new EventEmitter(), jobs = new Map();
   const sessionId = randomUUID();
   const viewerHeartbeatMs=Math.min(5000,(options.viewerIdleTimeout||120)*1000/3);
-  let running = false, submitted = !!options.reviewId, submittedId = options.reviewId || null, origin;
+  let running = false, agentRunning = false, submitted = !!options.reviewId, submittedId = options.reviewId || null, origin;
   const timeline = commitTimeline(repository, rangeOptions);
   const rounds = new Map();
   if (submittedId) {
@@ -142,7 +142,7 @@ export async function createTraceServer(options = {}) {
       const continueMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/continue$/);
       if(req.method==='POST' && continueMatch){
         if(req.headers['x-trace-token']!==token || req.headers.origin!==origin)return json(res,403,{error:'Open the review on the local server'});
-        if(running || continueMatch[1]!==submittedId)return json(res,409,{error:'Review cannot be continued yet'});
+        if(running || agentRunning || continueMatch[1]!==submittedId)return json(res,409,{error:'Review cannot be continued yet'});
         running=true;
         try {
           const next=await currentSnapshot();
@@ -154,7 +154,7 @@ export async function createTraceServer(options = {}) {
       if (req.method === 'POST' && approveMatch) {
         if (req.headers['x-trace-token'] !== token || req.headers.origin !== origin) return json(res, 403, {error: 'Open the review on the local server'});
         if (approveMatch[1] !== submittedId) return json(res, 404, {error: 'Review not open in this viewer'});
-        if (running) return json(res, 409, {error: 'The agent is still running. Review its changes before approving.'});
+        if (running || agentRunning) return json(res, 409, {error: 'The agent is still running. Review its changes before approving.'});
         running = true;
         try {
           const input = await body(req), current = await currentSnapshot();
@@ -171,11 +171,12 @@ export async function createTraceServer(options = {}) {
       }
       if (req.method === 'POST' && url.pathname === '/api/reviews') {
         if (req.headers['x-trace-token'] !== token || req.headers.origin !== origin) return json(res, 403, {error: 'Open the review on the local server'});
-        if (running || (submitted && !scope)) return json(res, 409, {error: 'This review has already been submitted. Start a new review.'});
+        const input = await body(req);
+        const closeViewer = input.closeViewer === true;
+        if (running || (submitted && !scope) || (agentRunning && !closeViewer)) return json(res, 409, {error: 'This review has already been submitted. Start a new review.'});
         // Lock before asynchronous validation to prevent concurrent duplicate submissions.
         running = true;
         try {
-          const input = await body(req);
           const ids = rounds.get(scope) || [];
           if (scope && (input.previousId || null) !== (ids.at(-1) || null)) {
             running = false;
@@ -186,7 +187,6 @@ export async function createTraceServer(options = {}) {
           const current = scope ? await scopeSnapshot(scope, {compose: true, round: parent?.reviewId}) : await snapshot();
           if (input.revision !== current.revision) { running = false; return json(res, 409, {error: 'Code has changed. Refresh the diff and review your comments.'}); }
           const outcome = input.outcome || 'changes_requested';
-          const closeViewer = input.closeViewer === true;
           if (closeViewer && outcome !== 'approved') throw new Error('Closing the viewer requires approval');
           if ((scope && outcome === 'approved' && !closeViewer) || !['changes_requested', 'approved', 'cancelled'].includes(outcome)) throw new Error('Invalid review outcome');
           if (!Array.isArray(input.comments) || input.comments.length > 100) throw new Error('Invalid comments');
@@ -230,8 +230,10 @@ export async function createTraceServer(options = {}) {
             const child = spawn('codex', ['exec', '--sandbox', 'workspace-write', '-C', repository.repo, '--color', 'never', '-o', join(dir, 'result.txt'), '-'], {stdio: ['pipe', 'ignore', 'pipe']});
             child.stdin.on('error', () => {}); child.stdin.end(prompt);
             child.stderr.on('data', c => { job.output = (job.output + c).slice(-16000); });
-            child.on('error', err => { job.status = 'failed'; job.output = err.message; running = false; });
-            child.on('close', async code => { if (job.status === 'failed') return; job.status = code === 0 ? 'succeeded' : 'failed'; try { job.output = await readFile(join(dir, 'result.txt'), 'utf8'); } catch {} running = false; });
+            agentRunning = true;
+            running = false;
+            child.on('error', err => { job.status = 'failed'; job.output = err.message; agentRunning = false; });
+            child.on('close', async code => { if (job.status === 'failed') return; job.status = code === 0 ? 'succeeded' : 'failed'; try { job.output = await readFile(join(dir, 'result.txt'), 'utf8'); } catch {} agentRunning = false; });
             return json(res, 202, {id, status: 'running', review: result});
           }
           running = closeViewer;
