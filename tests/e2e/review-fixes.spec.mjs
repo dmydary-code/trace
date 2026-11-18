@@ -30,7 +30,7 @@ test('fix: sending has a busy state, then a clickable sent state; lost acknowled
  await page.locator('#review').click();await expect(page.locator('#job-state')).toContainText('Review sent');await expect(page.locator('#send')).not.toBeVisible();await page.locator('#close-dialog').click();await page.reload();await expect(page.locator('.file-card .thread')).toContainText('Feedback');
 });
 test('fix: unbound viewer stays available after Send and reload, then releases its idle port',async({page,f})=>{
- const run=await f.start({lease:false,args:['--viewer-idle-timeout','0.6']}),app={url:run.ready.url};await load(page,app);await addComment(page,'Survive refresh');await send(page);expect(await run.exited).toBe(0);await page.reload();await expect(page.locator('.file-card .thread')).toContainText('Survive refresh');await page.close();await eventually(()=>fetch(app.url).then(()=>false,()=>true),'Idle viewer did not stop');await freePort(app.url);
+ const run=await f.start({lease:false,args:['--once','--viewer-idle-timeout','0.6']}),app={url:run.ready.url};await load(page,app);await addComment(page,'Survive refresh');await send(page);expect(await run.exited).toBe(0);await page.reload();await expect(page.locator('.file-card .thread')).toContainText('Survive refresh');await page.close();await eventually(()=>fetch(app.url).then(()=>false,()=>true),'Idle viewer did not stop');await freePort(app.url);
 });
 test('fix: imports remain clickable but are absent from usages and match highlights',async({page,app})=>{
  await load(page,app);const imported=page.locator('.line.context [data-symbol="subtotal"]').first();await imported.click();await expect(page.locator('[data-usage-result]')).toHaveCount(1);await expect(page.locator('.usage-results')).not.toContainText('import');await expect(page.locator('.usage-match')).toHaveCount(1);await expect(page.locator('.usage-match')).toContainText('return subtotal');
@@ -121,7 +121,7 @@ test('Approve queues a single approval while the first empty diff is loading', a
 });
 
 test('Approve inside the send dialog waits for the pending question to be saved', async ({page, f}) => {
- const run = await f.start({args: ['--listen']});
+ const run = await f.start({args: []});
  await load(page, {url: run.ready.url});
  await addComment(page, 'Please check shipping.');
  let release;

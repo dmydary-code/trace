@@ -22,7 +22,7 @@ const usage = `Trace ${version} — local code review for your current agent
 Usage: trace-review [review] [options]
        trace-review feedback [--review ID] [--repo path] [--json]
        trace-review reply --review ID --comment ID --agent codex|claude --body-file PATH
-       trace-review open [--review ID] [--repo path] [--no-open] [--listen]
+       trace-review open [--review ID] [--repo path] [--no-open] [--standalone]
        trace-review pending [--session-id ID] [--timeout SECONDS] --json
        trace-review stop-waiting [--session-id ID]
        trace-review install codex|claude|all
@@ -35,8 +35,10 @@ Review options:
   --staged          Review staged changes only
   --session-id ID   Bind viewer lifetime to an agent session (set by plugin hooks)
   --viewer-idle-timeout SECONDS  Close an unbound viewer after browser inactivity (default: 120)
-  --wait            Return feedback to the calling agent and exit on submission
-  --listen          Return each message to this agent until the viewer closes
+  --listen          Stream each message until the viewer closes (default)
+  --once            Return the first submission and exit (review only)
+  --wait            Legacy alias for --once outside agent sessions
+  --standalone      Open a viewer that saves feedback without a listener
   --json            Print newline-delimited JSON events
   --no-open         Print URL without opening a browser
   --port NUMBER     Loopback port (default: assigned automatically)
@@ -57,13 +59,12 @@ let target;
 try {
   if (command === 'install') target = args.shift();
   const values = {'--viewer-idle-timeout':'viewerIdleTimeout','--session-id': 'agentSessionId', '--repo': 'repo', '--base': 'base', '--port': 'port', '--timeout': 'timeout', '--agent': 'agent', '--review': 'reviewId', '--comment': 'commentId', '--body-file': 'bodyFile', '--status': 'status'};
-  const flags = {'--listen': 'listen', '--merge-base': 'mergeBase', '--staged': 'staged', '--wait': 'wait', '--json': 'json', '--no-open': 'noOpen', '--browser-fallback':'browserFallback', '--help': 'help', '-h': 'help', '--version': 'version', '-v': 'version'};
+  const flags = {'--listen': 'listen', '--once': 'once', '--standalone': 'standalone', '--merge-base': 'mergeBase', '--staged': 'staged', '--wait': 'wait', '--json': 'json', '--no-open': 'noOpen', '--browser-fallback':'browserFallback', '--help': 'help', '-h': 'help', '--version': 'version', '-v': 'version'};
   for (let i = 0; i < args.length; i++) {
     if (values[args[i]]) { const key = values[args[i]]; if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`Missing value for ${args[i]}`); options[key] = args[++i]; }
     else if (flags[args[i]]) options[flags[args[i]]] = true;
     else throw new Error(`Unknown option: ${args[i]}`);
   }
-  if (options.listen) options.wait = true;
   const emit = data => process.stdout.write(JSON.stringify(data) + '\n');
   if (options.version) console.log(version);
   else if (options.help || command === 'help') console.log(usage);
@@ -115,9 +116,21 @@ try {
     options.port = Number(options.port); options.timeout = Number(options.timeout);
     if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) throw new Error('Port must be 0–65535');
     if (!Number.isFinite(options.timeout) || options.timeout < 0) throw new Error('Timeout must be a non-negative number');
-    if (options.agent && options.wait) throw new Error('--agent and --wait are separate handoff modes');
+    const explicitModes = [options.listen, options.once, options.standalone, options.agent].filter(Boolean);
+    if (explicitModes.length > 1 || (options.wait && (options.agent || options.standalone))) {
+      throw new Error('Choose one handoff mode: --listen, --once, --standalone, or --agent codex');
+    }
+    const agentSessionId = options.agentSessionId || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID;
+    const wantsFeedback = !options.standalone && !options.agent;
+    if (wantsFeedback) options.ownerPid = agentOwner();
+    const inAgentSession = agentSessionId || options.ownerPid || process.env.CLAUDECODE === '1';
+    // Older plugins supply --wait. Keep those sessions listening, while
+    // preserving single-submission behavior for existing standalone scripts.
+    const once = options.once || (options.wait && !options.listen && !inAgentSession);
+    options.listen = wantsFeedback && !once;
+    options.wait = wantsFeedback;
     if (command === 'open') {
-      if ((options.wait && !options.listen) || options.agent) throw new Error('Use open --listen to receive messages from a reopened review');
+      if (once || options.agent) throw new Error('Use open to listen or open --standalone to browse a saved review');
       const {gitDir} = await openRepository(options.repo);
       options.reviewId ??= (await readReview(gitDir)).id;
       await readSnapshot(gitDir, options.reviewId);
@@ -131,7 +144,11 @@ try {
     };
     const showReady = data => {
       if (options.json) emit(data);
-      else console.log(`Trace: ${data.url}\nRepository: ${data.repo}\n${options.wait ? 'Waiting for review feedback…' : 'Press Ctrl+C to stop the viewer.'}`);
+      else {
+        const status = options.listen ? 'Listening for review messages…'
+          : options.wait ? 'Waiting for the first submission…' : 'Press Ctrl+C to stop the viewer.';
+        console.log(`Trace: ${data.url}\nRepository: ${data.repo}\n${status}`);
+      }
       openBrowser(data.url);
       if(options.browserFallback && options.noOpen)cancelBrowserFallback=browserFallback(data.url,url=>{console.error('Trace preview did not confirm loading. Opening the same review in your default browser.');openBrowser(url,true);});
     };
@@ -141,12 +158,13 @@ try {
     };
     if(options.viewerIdleTimeout!==undefined){options.viewerIdleTimeout=Number(options.viewerIdleTimeout);if(!Number.isFinite(options.viewerIdleTimeout)||options.viewerIdleTimeout<=0)throw Error('Viewer idle timeout must be greater than zero');}
     if (options.wait) {
-      options.ownerPid=agentOwner();
-      const id=options.agentSessionId || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID;
-      options.sessionLease=id ? await sessionLease(id).catch(error=>{if(options.agentSessionId)throw error;return null;}) : null;
+      options.sessionLease = agentSessionId ? await sessionLease(agentSessionId).catch(error => {
+        if (options.agentSessionId) throw error;
+        return null;
+      }) : null;
       if(!options.sessionLease)options.sessionLease=await ownedSessionLease(options.ownerPid);
       if(!options.sessionLease)console.error('Trace: No agent session detected. Viewer follows browser activity; enable session hooks to close it on /clear.');
-      // Only the HTTP viewer stays alive after feedback; the calling agent resumes normally.
+      // The listener can stream several submissions from the same HTTP viewer.
       const viewer = fork(join(root, 'lib/viewer.mjs'), [], {detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc']});
       let timer, finished = false;
       const finish = (code, keepViewer = false) => {

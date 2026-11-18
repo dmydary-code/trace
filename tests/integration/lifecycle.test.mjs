@@ -30,7 +30,7 @@ test('L-05 detected owner process loss releases viewer port without SessionEnd',
  const run=await f.start({sessionId:'crash'}),app={url:run.ready.url},s=await session(app);await post(app,s,undefined,{instruction:'Check shipping'});await run.exited;owner.kill();await stopped(run);
 });
 test('L-07 no lease closes after browser inactivity; L-08 timeout never approves',async t=>{
- const f=await setup(t);const run=await f.start({lease:false,args:['--viewer-idle-timeout','0.1']}),app={url:run.ready.url},s=await session(app);await post(app,s,undefined,{instruction:'Check shipping'});assert.equal(await run.exited,0);assert.match(run.stderr,/No agent session detected/);await stopped(run);
+ const f=await setup(t);const run=await f.start({lease:false,args:['--wait','--viewer-idle-timeout','0.1']}),app={url:run.ready.url},s=await session(app);await post(app,s,undefined,{instruction:'Check shipping'});assert.equal(await run.exited,0);assert.match(run.stderr,/No agent session detected/);await stopped(run);
  const timed=await f.start({args:['--timeout','0.05']});assert.equal(await timed.exited,2);assert(timed.events.some(e=>e.event==='timeout'));assert(!timed.events.some(e=>e.event==='feedback'));await stopped(timed);
 });
 test('L-09 parent process crash before feedback closes orphan viewer',async t=>{
