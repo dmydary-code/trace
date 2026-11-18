@@ -18,4 +18,5 @@ export const projectById = id => projects.find(p => p.id === id);
 export const graphEdges = {
  javascript:[['src/pricing.js','src/subtotal.js','Imports'],['src/pricing.js','src/subtotal.js','Calls'],['tests/unit/pricing.test.js','src/pricing.js','Imports'],['tests/unit/pricing.test.js','src/pricing.js','Calls']],
  typescript:[['src/pricing.ts','src/subtotal.ts','Imports'],['src/pricing.ts','src/subtotal.ts','Calls'],['src/pricing.ts','src/types.ts','Uses type'],['tests/unit/pricing.test.ts','src/pricing.ts','Imports'],['tests/unit/pricing.test.ts','src/pricing.ts','Calls']],
+ kotlin:[['src/main/kotlin/Pricing.kt','src/main/kotlin/Subtotal.kt','Calls'],['tests/unit/PricingTest.kt','src/main/kotlin/Pricing.kt','Calls']],
 };

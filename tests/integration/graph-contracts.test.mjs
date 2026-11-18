@@ -38,6 +38,50 @@ test('G-13 cycles, diamonds, disconnected files and other languages retain actua
  const f=await setup(t);for(const [name,body] of Object.entries({'a.js':"import './b.js'; import './c.js';\n",'b.js':"import './d.js';\n",'c.js':"import './d.js';\n",'d.js':"import './a.js';\n",'alone.rs':'pub fn alone() {}\n'}))await f.put('topology/'+name,body);
  const g=await graph(f);for(const [a,b] of [['a','b'],['a','c'],['b','d'],['c','d'],['d','a']])assert(edge(g,'topology/'+a+'.js','topology/'+b+'.js','Imports'));assert(g.nodes.some(n=>n.path==='topology/alone.rs'));assert(!g.edges.some(e=>e.source.endsWith('.rs')));
 });
+test('Kotlin graph resolves local imports, aliases, types and source sets across revisions', async t => {
+  const f = await fixture('kotlin');
+  t.after(() => f.dispose());
+  const entry = 'app/src/test/kotlin/Checkout.kt';
+  const previous = 'lib/src/main/kotlin/Legacy.kt';
+  const pricing = 'lib/src/main/kotlin/Prices.kt';
+  const currency = 'lib/src/main/kotlin/Currency.kt';
+  const receipt = 'lib/src/main/kotlin/Receipt.kt';
+  await f.put(previous, 'package old\nfun legacy() = 1\n');
+  await f.put(pricing, 'package prices\nfun calculate() = 2\n');
+  await f.put(currency, 'package prices\nclass Currency\n');
+  await f.put(receipt, 'package result\nclass Receipt\n');
+  await f.put('app/src/main/kotlin/Alternate.kt', 'package prices\nclass Variant\n');
+  await f.put('app/src/debug/kotlin/Alternate.kt', 'package prices\nclass Variant\n');
+  await f.put('app/src/main/kotlin/Unrelated.kt', 'package other\nfun ignore() = 0\n');
+  await f.put(entry, 'package checkout\nimport old.legacy\nfun checkout() = legacy()\n');
+  await f.git('add', '.');
+  await f.git('commit', '-m', 'Kotlin package baseline');
+
+  await f.put(entry, [
+    'package checkout',
+    'import prices.calculate as pricing',
+    'import prices.Currency',
+    'import prices.Variant',
+    'import result.*',
+    'import external.SDK',
+    '/* /* nested comment */ import other.ignore */',
+    'fun checkout(currency: Currency): Receipt {',
+    '  val text = """',
+    'import other.ignore',
+    '  """',
+    '  pricing()',
+    '  return Receipt()',
+    '}',
+  ].join('\n'));
+  const g = await graph(f);
+  assert.equal(g.nodes.find(node => node.path === entry).test, 'test');
+  assert.deepEqual(g.edges.filter(e => e.source === entry).map(e => [e.target, e.kind, e.change]).sort(), [
+    [previous, 'Imports', '−'], [previous, 'Calls', '−'],
+    [pricing, 'Imports', '+'], [pricing, 'Calls', '+'],
+    [currency, 'Imports', '+'], [currency, 'Uses type', '+'],
+    [receipt, 'Imports', '+'], [receipt, 'Uses type', '+'],
+  ].sort());
+});
 test('G-16/N-06 diff remains usable while Graph builds, rejects, coalesces and retries',async t=>{
  const f=await setup(t);let finish,calls=0;const app=await f.server({graphBuilder:()=>{calls++;return new Promise((ok,fail)=>finish={ok,fail});}});const s=await session(app);assert.equal(calls,0);
  const url=app.url+'/api/graph?revision='+s.revision;const first=fetch(url),second=fetch(url);await eventually(()=>finish);assert.equal((await session(app)).revision,s.revision);assert.equal(calls,1);finish.fail(Error('Injected graph failure'));assert.equal((await first).status,400);assert.equal((await second).status,400);

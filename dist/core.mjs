@@ -1,6 +1,9 @@
 export function isGraphSource(path) {
-  return /\.[cm]?[jt]sx?$/.test(path);
+  return isJavaScriptGraphSource(path) || isKotlinGraphSource(path);
 }
+
+export const isJavaScriptGraphSource = path => /\.[cm]?[jt]sx?$/.test(path);
+export const isKotlinGraphSource = path => typeof path === 'string' && path.endsWith('.kt');
 
 export const profiles = {
  backend: {label:'Backend', layers:['Contract','Implementation','Consumers','Tests'],stacks:{nestjs:'TypeScript · NestJS',fastapi:'Python · FastAPI',spring:'Java · Spring'},patterns:{layered:'Layered services',clean:'Clean / Hexagonal',events:'Event-driven'}},

@@ -128,13 +128,13 @@ function tree() {
 }
 const replyLabels = {addressed: 'Addressed', needs_input: 'Needs input', not_changed: 'Not changed', note: 'Note'};
 function replies(id) {
-  return (activeReview?.replies || []).filter(r => r.commentId === id).map(r => `<div class="agent-reply"><div class="thread-head"><span class="comment-author"><span class="avatar agent-avatar" aria-hidden="true">${esc(r.author.name.slice(0, 1))}</span><span class="author-name">${esc(r.author.name)}</span></span><span class="reply-status">${esc(replyLabels[r.status] || 'Reply')}</span><time datetime="${esc(r.createdAt)}">${esc(new Date(r.createdAt).toLocaleString())}</time></div><p>${esc(r.body)}</p></div>`).join('');
+  return (activeReview?.replies || []).filter(r => r.commentId === id).map(r => `<div class="agent-reply comment-bubble"><div class="thread-head"><span class="comment-author"><span class="avatar agent-avatar" aria-hidden="true">${esc(r.author.name.slice(0, 1))}</span><span class="author-name">${esc(r.author.name)}</span></span><span class="reply-status">${esc(replyLabels[r.status] || 'Reply')}</span><time datetime="${esc(r.createdAt)}">${esc(new Date(r.createdAt).toLocaleString())}</time></div><p>${esc(r.body)}</p></div>`).join('');
 }
 function thread(c) {
   const name = session?.author?.name || 'Git author not configured';
   const words = session?.author?.name?.trim().split(/\s+/u) || [];
   const initials = words.length ? [words[0], ...(words.length > 1 ? [words.at(-1)] : [])].map(word => Array.from(word)[0]).join('').toLocaleUpperCase() : '?';
-  return `<div data-comment-id="${esc(c.id)}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><div class="thread-history">${submitted ? priorMessages() : ''}</div><p>${esc(c.body)}</p>${submitted ? `<button data-followup="${esc(c.id)}">Reply</button>` : ''}<div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
+  return `<div data-comment-id="${esc(c.id)}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><div class="thread-history">${submitted ? priorMessages() : ''}</div><p class="comment-bubble">${esc(c.body)}</p>${submitted ? `<button data-followup="${esc(c.id)}">Reply</button>` : ''}<div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
 }
 function syncSubmitted(data) {
   activeReview = data; submitted = true; editor = null; editId = null;
@@ -148,7 +148,8 @@ function syncSubmitted(data) {
   $('#review-status-text').textContent = data.outcome === 'approved' ? 'Review approved.' : data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. You can reply here or start another message.';
   $('#reply-connection').textContent = 'Agent replies update automatically.';
   $('#general-thread').hidden = !data.instruction;
-  $('#general-instruction').innerHTML = priorMessages() + esc(data.instruction || '');
+  $('#general-history').innerHTML = priorMessages();
+  $('#general-instruction').textContent = data.instruction || '';
   $('#general-replies').innerHTML = replies('review');
   completionButtons(); startReplies();
 
@@ -637,7 +638,7 @@ function completionButtons() {
   $('#rounds').innerHTML = ids.map((id, i) => `<option value="${esc(id)}" ${id === activeReview?.id ? 'selected' : ''}>Message ${i + 1}</option>`).join('') + `<option value="" ${!submitted ? 'selected' : ''}>New message</option>`;
 }
 function priorMessages() {
-  return (activeReview?.thread || []).map(message => `<div class="previous-message"><strong>${esc(message.author)}</strong><p>${esc(message.body)}</p></div>`).join('');
+  return (activeReview?.thread || []).map(message => `<div class="previous-message comment-bubble"><strong>${esc(message.author)}</strong><p>${esc(message.body)}</p></div>`).join('');
 }
 function setLocation(params, replace = false) {
   viewParams = params;
