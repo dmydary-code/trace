@@ -1,14 +1,16 @@
 # Graph review
 
-Trace offers **Graph** when the current diff includes a JavaScript or TypeScript file, including JSX, TSX and module variants. A deletion or rename from a supported path also qualifies. In a mixed repository this follows the selected commit or comparison. Diffs containing only other files open in **Files**. Select a node to reveal its unchanged neighbors and open its diff on the right. Unchanged and deleted files show source (the base version for deleted files). Renames remain one node. The sidebar toggle collapses the file list completely.
+Trace offers **Graph** when the current diff includes JavaScript or TypeScript source (including JSX, TSX and module variants) or Kotlin source (`.kt`). A deletion or rename from a supported path also qualifies. In a mixed repository this follows the selected commit or comparison. Diffs containing only other files open in **Files**. Select a node to reveal its unchanged neighbors and open its diff on the right. Unchanged and deleted files show source (the base version for deleted files). Renames remain one node. The sidebar toggle collapses the file list completely.
 
-Node colors identify code, unit tests, integration tests, E2E tests and unclassified tests. Brightness indicates diff membership, not whether the dependency itself changed. Edge badges + and − compare base and current dependencies. Solid edges show imports, dashed edges show calls through imported bindings, dotted edges show type-only imports. Test edges use the source test color.
+Node colors identify code, unit tests, integration tests, E2E tests and unclassified tests. Brightness indicates diff membership. Edge badges + and − compare base and current dependencies. Solid edges show imports, dashed edges show calls, and dotted edges show type references. Test edges use the source test color.
 
 JavaScript and TypeScript files that only forward exports, including barrel files such as `index.ts`, are folded into the connections to their implementations. Files with local declarations or runtime logic remain visible. You can still review a changed barrel and its comments in **Files**.
 
-The initial analyzer supports relative JavaScript and TypeScript imports, re-exports, literal require calls and direct calls of imported bindings. It does not resolve package aliases, dynamic expressions, framework dispatch, member calls or other languages. Calls use static text matching, not compiler symbol resolution. Type edges currently identify explicit type-only imports. These limits mean missing edges do not prove that files are unrelated.
+For JavaScript and TypeScript, Trace follows relative imports, re-exports, literal require calls, direct calls of imported bindings and explicit type-only imports.
 
-Test categories use explicit unit/integration/e2e directory conventions. Generic `.test` and `.spec` files remain unclassified. Projects can declare directory mappings in `.trace-graph.json`:
+For Kotlin, Trace indexes top-level declarations by package across local `.kt` files. It follows explicit imports and aliases, direct calls of top-level functions, and simple type references such as parameter types and constructors. Calls and types can also resolve within the same package or through a wildcard import when the target is unique. Kotlin projects can use this with Gradle JVM and Android source trees. Analysis reads source files only. Gradle scripts, generated sources outside Git, extension and member dispatch, and compiler overload resolution are outside its scope. Ambiguous symbols are omitted.
+
+Test categories use explicit unit/integration/e2e directory conventions. Generic `.test` and `.spec` files, Kotlin test source sets and files named `*Test.kt` or `*Spec.kt` are unclassified by default. Projects can declare directory mappings in `.trace-graph.json`:
 
 ```json
 {"testDirectories":{"unit":["tests/unit"],"integration":["tests/integration"],"e2e":["tests/browser"]}}

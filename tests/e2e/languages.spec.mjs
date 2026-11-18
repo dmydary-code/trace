@@ -10,11 +10,16 @@ for(const [i,p] of projects.entries())for(const agent of ['codex','claude'])test
   await expect(page.locator('#branch')).toContainText('main');await expect(page.locator('#repository-location')).toContainText(f.repo);
   await addComment(page,'Include the supplied shipping fee.');await addComment(page,'Preserve the existing function signature.','del');
   await page.locator('.file-card .thread').filter({hasText:'Include the supplied shipping fee.'}).locator('[data-edit]').click();await page.locator('#comment-body').fill('Include shipping, not a hard-coded constant.');await page.getByRole('button',{name:'Save',exact:true}).click();
-  if (p.id === 'javascript' || p.id === 'typescript') {
+  if (['javascript', 'typescript', 'kotlin'].includes(p.id)) {
     await graph(page);
     await expect(page.locator('.graph-node:not(.context)')).toHaveCount(1);
     await select(page,p.path);
     await expect(page.locator('#graph-file-content')).toContainText(p.after.split('\n').find(l=>l.includes('+ 1'))?.trim()||'');
+    if (p.id === 'kotlin') {
+      await select(page, p.testPath);
+      await expect(page.locator('#graph-preview-label')).toBeVisible();
+      await expect(page.locator('#graph-file-content')).toContainText('check(total(300, 5)');
+    }
     await page.locator('#close-graph-file').click();
     await page.locator('#files-mode').click();
   } else {

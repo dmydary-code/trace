@@ -16,7 +16,7 @@ Local code review for **Codex and Claude Code**. Explore changes, leave line com
 - **Finish a review.** Click **Approve** in the header to save approval for the displayed changes and stop this local Trace server.
 - **Talk to your agent.** Send questions or requests on the overall diff, a commit or a specific line. Use **Reply** to continue in the same thread.
 
-Graph appears when the current diff includes JavaScript or TypeScript source. Other diffs open in **Files**. Find Usages matches identifier names within one side of the diff, so unrelated same-name symbols can appear together. [Graph details](docs/graph.md).
+Graph appears when the current diff includes JavaScript, TypeScript or Kotlin source. Other diffs open in **Files**. Find Usages matches identifier names within one side of the diff, so unrelated same-name symbols can appear together. [Graph details](docs/graph.md).
 
 New Year lights decorate the Trace tree and header by default in either color scheme. Toggle **New Year lights** in **Appearance** to save your preference.
 
