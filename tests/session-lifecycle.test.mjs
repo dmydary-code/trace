@@ -53,7 +53,7 @@ test('submitted viewer stays available until session ends, then releases its por
  await writeFile(join(repo,'file.ts'),'export const count=1;\n');
  const env={...process.env,TRACE_SESSION_DIRECTORY:join(dir,'sessions')};
  await runHook(env,{session_id:'review',hook_event_name:'SessionStart',source:'startup'});
- const child=spawn(process.execPath,[resolve('bin/trace.mjs'),'--repo',repo,'--wait','--json','--no-open','--session-id','review'],{env,stdio:['ignore','pipe','pipe']});
+ const child=spawn(process.execPath,[resolve('bin/trace.mjs'),'--repo',repo,'--once','--json','--no-open','--session-id','review'],{env,stdio:['ignore','pipe','pipe']});
  t.after(()=>child.kill());let errors='';child.stderr.on('data',d=>errors+=d);let output='';child.stdout.on('data',d=>output+=d);let code;child.on('exit',c=>code=c);
  await until(()=>{if(code!==undefined && !output)throw Error(errors);return output.includes('\n');});const ready=JSON.parse(output.split('\n')[0]);t.after(()=>{try{process.kill(ready.viewerPid);}catch{}});
  const session=await(await fetch(ready.url+'/api/session')).json();
@@ -67,7 +67,7 @@ test('without a session lease inactive browser ownership does not leave a detach
  const dir=await mkdtemp(join(tmpdir(),'trace-unowned-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  await exec('git',['init',dir]);await writeFile(join(dir,'file.ts'),'export const count=1;\n');
  const env={...process.env};delete env.CODEX_THREAD_ID;delete env.CLAUDE_SESSION_ID;
- const child=spawn(process.execPath,[resolve('bin/trace.mjs'),'--repo',dir,'--wait','--json','--no-open','--viewer-idle-timeout','0.1'],{env,stdio:['ignore','pipe','pipe']});
+ const child=spawn(process.execPath,[resolve('bin/trace.mjs'),'--repo',dir,'--once','--json','--no-open','--viewer-idle-timeout','0.1'],{env,stdio:['ignore','pipe','pipe']});
  t.after(()=>child.kill());let output='',errors='';let code;child.stdout.on('data',d=>output+=d);child.stderr.on('data',d=>errors+=d);child.on('exit',c=>code=c);
  await until(()=>{if(code!==undefined&&!output)throw Error(errors);return output.includes('\n');});const ready=JSON.parse(output.split('\n')[0]);t.after(()=>{try{process.kill(ready.viewerPid);}catch{}});
  const session=await(await fetch(ready.url+'/api/session')).json();

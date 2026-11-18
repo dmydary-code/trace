@@ -20,6 +20,7 @@ trace-review                    # Open working-tree changes against HEAD
 trace-review --staged                  # Staged changes only
 trace-review --base origin/main --merge-base  # Branch/MR-style baseline
 trace-review --repo /path/to/project --no-open
+trace-review --standalone              # Collect feedback locally for later retrieval
 trace-review feedback --json           # Latest submitted review, including replies
 trace-review feedback --review ID --json # A specific saved review
 trace-review open                       # Reopen the most recent submission with its replies
@@ -31,9 +32,11 @@ trace-review doctor                    # Check Git, repository, and installed ag
 
 Renames, deletions, binary files, empty files, and mode changes remain visible. Binary files have no line comments. Untracked text previews larger than 1 MiB are summarized. Symlink previews show their target without reading the target file. Large tracked diffs over the 32 MiB process limit produce an error instead of silently disappearing.
 
-For automation, `--wait --json` prints newline-delimited events: `ready` with the URL/session ID, then `feedback` with outcome, revision, anchors, instructions, and saved review path. The calling command exits after submission. With session hooks enabled, its local HTTP viewer stays available until that agent session ends. Without a session lease, browser heartbeats keep the viewer available across reloads; it closes after two minutes without browser activity, or when its detected owning agent process exits. Use `--viewer-idle-timeout SECONDS` to configure this fallback inactivity limit. Hooks are required to detect context clearing reliably. Reopen the saved review with `trace-review open --review ID`. No model process is kept alive by the viewer. The default timeout is 1800 seconds; set `--timeout 0` for no limit. Exit codes: 0 submitted, 1 error, 2 timeout, 3 cancelled, 130 interrupted. Match the `sessionId` when recovering a result with `trace-review feedback` so old feedback is not mistaken for a new submission.
+Both `review` and `open` listen for the whole conversation by default. `--listen` selects the same mode explicitly. With `--json`, the command emits one `ready` event with the URL and session ID, followed by a `feedback` event for each submission. Keep the command running and read its output between replies. Use `--standalone` to open a viewer and retrieve feedback later with `trace-review feedback --json`.
 
-`--listen --json` streams each submitted message in order to the same calling process. After the first feedback event the command stays available while the conversation is active. Both agent integrations use this mode. Keep the command running and read its output between replies.
+Use `review --once --json` for automation that needs the command to exit after the first submission. Older plugins that pass `--wait` in Codex or Claude still get a continuous listener. Outside an agent session, `--wait` remains an alias for `--once`.
+
+Session hooks tie the viewer to the agent session and detect context clearing. The browser sends heartbeats while it is active. Use `--viewer-idle-timeout SECONDS` to change the default two-minute inactivity limit for a listener or an unbound one-submission viewer. Set `--timeout 0` to wait indefinitely for the first message instead of the default 30 minutes. Exit codes are 0 for completion, 1 for error, 2 for timeout, 3 for cancellation, and 130 for interruption. When recovering feedback, match its `sessionId` to the original viewer.
 
 **Working tree** opens the original CLI comparison. **Commits** lists first-parent commits oldest first. An explicit base defines the range. Otherwise Trace uses the common ancestor with the remote default branch (or local main/master) on feature branches. On the default branch it starts with up to 20 recent commits. The starting boundary stays fixed in this viewer. The initial commit compares against the empty tree and merge commits compare against their first parent. **Overall** compares the range baseline with the current working tree, or the index for staged reviews.
 
@@ -49,7 +52,7 @@ In terminal Codex, the Trace plugin uses `--listen` for the full conversation. E
 trace-review --agent codex
 ```
 
-This explicitly starts a separate `codex exec` process on submission with the `workspace-write` sandbox. It is independent of the calling conversation and cannot be combined with `--wait`. The Codex and Claude plugins use the same-session feedback loop instead.
+This explicitly starts a separate `codex exec` process on submission with the `workspace-write` sandbox. Use this mode on its own. The Codex and Claude plugins return feedback to the agent that opened Trace.
 
 ## Git on macOS
 

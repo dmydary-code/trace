@@ -39,7 +39,7 @@ export async function freePort(url, timeout = 6000) {
 export async function fixture(id='javascript',{changed=true,commit=true}={}) {
  const project=projectById(id),dir=await realpath(await mkdtemp(join(tmpdir(),'trace-acceptance-'))),repo=join(dir,'repo'),cleanups=[];
  await mkdir(repo);const env={...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',TRACE_SESSION_DIRECTORY:join(dir,'sessions')};
- delete env.CODEX_THREAD_ID;delete env.CLAUDE_SESSION_ID;delete env.TRACE_BUNDLE_HOME;
+ delete env.CODEX_THREAD_ID;delete env.CLAUDE_SESSION_ID;delete env.CLAUDECODE;delete env.TRACE_BUNDLE_HOME;
  const git=async(...args)=>(await exec('git',['-C',repo,...args],{env,timeout:10000})).stdout.trimEnd();
  const put=async(path,text)=>{await mkdir(dirname(join(repo,path)),{recursive:true});await writeFile(join(repo,path),text);};
  await git('init','-b','main');await git('config','user.name','Trace Fixture');await git('config','user.email','fixture@example.invalid');
@@ -55,9 +55,9 @@ export async function fixture(id='javascript',{changed=true,commit=true}={}) {
   child.stdin.end(JSON.stringify({hook_event_name:event,session_id:sessionId,source}));return done;
  };
  const server=async(options={})=>{const app=await createTraceServer({repo,...options});cleanups.push(()=>app.close());return app;};
- const start=async({sessionId='fixture-session',lease=true,args=[],command='review'}={})=>{
+ const start=async({sessionId='fixture-session',lease=true,args=['--once'],command='review'}={})=>{
   if(lease)await hook('SessionStart',sessionId);
-  const child=spawn(process.execPath,[join(root,'bin/trace.mjs'),command,'--repo',repo,'--wait','--json','--no-open',...(lease?['--session-id',sessionId]:[]),...args],{env,stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,[join(root,'bin/trace.mjs'),command,'--repo',repo,'--json','--no-open',...(lease?['--session-id',sessionId]:[]),...args],{env,stdio:['ignore','pipe','pipe']});
   let output='',stderr='';const events=[];let code;
   const exited=new Promise((ok,fail)=>{child.once('error',fail);child.once('close',value=>{code=value;ok(value);});});
   child.stderr.on('data',d=>stderr=(stderr+d).slice(-16000));
