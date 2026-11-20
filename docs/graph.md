@@ -1,6 +1,6 @@
 # Graph review
 
-Trace offers **Graph** when the current diff includes JavaScript or TypeScript source (including JSX, TSX and module variants) or Kotlin source (`.kt`). A deletion or rename from a supported path also qualifies. In a mixed repository this follows the selected commit or comparison. Diffs containing only other files open in **Files**. Select a node to reveal its unchanged neighbors and open its diff on the right. Unchanged and deleted files show source (the base version for deleted files). Renames remain one node. The sidebar toggle collapses the file list completely.
+Trace offers **Graph** when the current diff includes JavaScript or TypeScript source (including JSX, TSX and module variants), Kotlin source (`.kt`) or Python source (`.py`). A deletion or rename from a supported path also qualifies. In a mixed repository this follows the selected commit or comparison. Diffs containing only other files open in **Files**. Select a node to reveal its unchanged neighbors and open its diff on the right. Unchanged and deleted files show source (the base version for deleted files). Renames remain one node. The sidebar toggle collapses the file list completely.
 
 Node colors identify code, unit tests, integration tests, E2E tests and unclassified tests. Brightness indicates diff membership. Edge badges + and − compare base and current dependencies. Solid edges show imports, dashed edges show calls, and dotted edges show type references. Test edges use the source test color.
 
@@ -9,6 +9,8 @@ JavaScript and TypeScript files that only forward exports, including barrel file
 For JavaScript and TypeScript, Trace follows relative imports, re-exports, literal require calls, direct calls of imported bindings and explicit type-only imports.
 
 For Kotlin, Trace indexes top-level declarations by package across local `.kt` files. It follows explicit imports and aliases, direct calls of top-level functions, and simple type references such as parameter types and constructors. Calls and types can also resolve within the same package or through a wildcard import when the target is unique. Kotlin projects can use this with Gradle JVM and Android source trees. Analysis reads source files only. Gradle scripts, generated sources outside Git, extension and member dispatch, and compiler overload resolution are outside its scope. Ambiguous symbols are omitted.
+
+For Python, Trace follows local absolute and package-relative imports, including aliases, multiline imports and package initializers. It checks the project directory and its `src/` layout, including local namespace packages. If both roots contain a concrete absolute target, Trace skips the ambiguous edge. Relative imports stop at the source root. Direct calls to an imported name or a function on an imported module add a **Calls** edge. The analysis uses source text, so it can run without a Python interpreter. External packages, dynamic imports, runtime path changes and type inference are outside its scope. Call detection uses the spelling of the imported binding and does not model local shadowing.
 
 Test categories use explicit unit/integration/e2e directory conventions. Generic `.test` and `.spec` files, Kotlin test source sets and files named `*Test.kt` or `*Spec.kt` are unclassified by default. Projects can declare directory mappings in `.trace-graph.json`:
 

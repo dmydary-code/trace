@@ -10,7 +10,7 @@ import {commitTimeline, isCommitId} from './lib/timeline.mjs';
 import {buildGraph} from './lib/graph.mjs';
 import {detectRoutes} from './lib/detect.mjs';
 import {reviewPrompt} from './dist/core.mjs';
-import {commentId, saveReview, readReview, readSnapshot, reviewDirectory, approveSavedReview} from './lib/reviews.mjs';
+import {conversationTurn, commentId, saveReview, readReview, readSnapshot, reviewDirectory, approveSavedReview} from './lib/reviews.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 function json(res, status, data) {
@@ -214,8 +214,8 @@ export async function createTraceServer(options = {}) {
               if (anchor && (comments.length !== 1 || comments[0].path !== anchor.path || comments[0].index !== anchor.index)) throw Error('Reply must use the original line');
               if (general && (comments.length || !instruction.trim())) throw Error('Reply must use the original conversation');
               review.replyTo = {reviewId: prior.id, commentId: parent.commentId};
-              review.thread = [...(prior.thread || []), {author: prior.author?.name || 'Reviewer', body: general || anchor.body},
-                ...prior.replies.filter(reply => reply.commentId === parent.commentId).map(reply => ({author: reply.author.name, body: reply.body}))];
+              review.thread = [...(prior.thread || []), ...conversationTurn(prior, parent.commentId)]
+                .sort((a,b) => a.createdAt.localeCompare(b.createdAt));
             }
           }
           const prompt = outcome === 'changes_requested' ? reviewPrompt(review) + (instruction ? '\n\nAdditional instructions:\n' + instruction : '') : outcome === 'approved' ? 'The user finished this review without requesting changes. This does not authorize committing, merging, or publishing.' : 'The user cancelled this review. Do not infer approval.';
@@ -250,7 +250,7 @@ export async function createTraceServer(options = {}) {
         } catch (err) { running = false; throw err; }
       }
       if (req.method !== 'GET') return json(res, 405, {error: 'Method not supported'});
-      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/usages.mjs': 'usages.mjs', '/graph-layout.mjs': 'graph-layout.mjs', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
+      const allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/syntax.mjs': 'syntax.mjs', '/usages.mjs': 'usages.mjs', '/graph-layout.mjs': 'graph-layout.mjs', '/style.css': 'style.css', '/core.mjs': 'core.mjs', '/logo.svg': 'logo.svg', '/fonts/FragmentMono-Regular.woff2': 'fonts/FragmentMono-Regular.woff2'};
       const file = allowed[url.pathname]; if (!file) return json(res, 404, {error: 'Not found'});
       let content = await readFile(join(root, 'dist', file));
       if (file === 'index.html') content = content.toString().replace('<html lang="en">', '<html lang="en" data-trace-local="true">');

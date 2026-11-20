@@ -44,9 +44,9 @@ test('Graph follows the active diff and restores the preferred mode for mixed ch
  const initialRequests = graphRequests.length;
 
  await f.put(f.project.path, f.project.before);
- await f.put('backend/pricing.py', 'price = 1');
+ await f.put('backend/pricing.txt', 'price = 1');
  await page.reload();
- await expect(page.locator('.file-card')).toContainText('backend/pricing.py');
+ await expect(page.locator('.file-card')).toContainText('backend/pricing.txt');
  await expect(page.locator('#route-mode')).toBeHidden();
  await expect(page.locator('.graph-help')).toBeHidden();
  expect(graphRequests).toHaveLength(initialRequests);

@@ -125,3 +125,48 @@ test('barrels route named, wildcard and type-only bindings through chains and cy
  assert.equal(edge(updated,'src/use.ts','src/subtotal.js','Calls').change,'−');
  assert.equal(edge(updated,'src/use.ts','src/other.ts','Calls').change,'+');
 });
+
+test('Python graph compares local flat, src and relative imports across revisions', async t => {
+  const f = await fixture('python');
+  t.after(() => f.dispose());
+  const project = 'services/pay';
+  const entry = project + '/src/pay/flows/checkout.py';
+  const files = {
+    'pyproject.toml':'[project]\nname="pay"\n',
+    'src/pay/legacy.py':'def fee(): return 1',
+    'src/pay/rates.py':'def fee(): return 2',
+    'src/pay/ident.py':'def currency(): return "USD"',
+    'src/pay/flows/__init__.py':'def available(): return True',
+    'audit.py':'def record(): pass',
+    'noise.py':'def noise(): pass',
+    'src/shadow.py':'x = 1',
+    'src/shadow/child.py':'def noise(): pass',
+    'conflict.py':'x = 1',
+    'src/conflict.py':'x = 2',
+  };
+  for (const [path, text] of Object.entries(files)) await f.put(project + '/' + path, text);
+  await f.put(entry, 'from ..legacy import fee\nfee()\n');
+  await f.git('add','.');
+  await f.git('commit','-m','Python imports');
+  await f.put(entry, [
+    'from ..rates import (', '    fee as charge,', ')',
+    'from pay import ident as ids',
+    'from . import available',
+    'import audit as log, requests',
+    'charge(); log.record(); ids.currency(); available()',
+    '"""import noise', 'noise.noise()', '"""',
+    '# from noise import noise',
+    'from ... import noise', // Above the package root.
+    'import conflict',       // Two concrete targets in the flat and src roots.
+    'import shadow.child',   // shadow.py is not a package.
+  ].join('\n'));
+  const g = await graph(f);
+  const expected = [
+    ['src/pay/legacy.py', '−'],
+    ['src/pay/rates.py', '+'],
+    ['src/pay/ident.py', '+'],
+    ['src/pay/flows/__init__.py', '+'],
+    ['audit.py', '+'],
+  ].flatMap(([file, change]) => ['Imports','Calls'].map(kind => [project + '/' + file, kind, change]));
+  assert.deepEqual(g.edges.filter(edge => edge.source === entry).map(e => [e.target,e.kind,e.change]).sort(), expected.sort());
+});
