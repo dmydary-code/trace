@@ -1,7 +1,8 @@
 export function isGraphSource(path) {
-  return isJavaScriptGraphSource(path) || isKotlinGraphSource(path);
+  return isJavaScriptGraphSource(path) || isKotlinGraphSource(path) || isPythonGraphSource(path);
 }
 
+export const isPythonGraphSource = path => typeof path === 'string' && path.endsWith('.py');
 export const isJavaScriptGraphSource = path => /\.[cm]?[jt]sx?$/.test(path);
 export const isKotlinGraphSource = path => typeof path === 'string' && path.endsWith('.kt');
 

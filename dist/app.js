@@ -1,4 +1,5 @@
-import {diffTokens, findDiffUsages, usageLineHtml, primaryDiffDeclaration} from './usages.mjs';
+import {sourceLanguage, tokenHtml, sourceHtml} from './syntax.mjs';
+import {diffTokenLines, findDiffUsages, primaryDiffDeclaration} from './usages.mjs';
 import {stableGraphLayout, revealGraphPath, fileCommentCount, routeGraphEdges, graphZoom} from './graph-layout.mjs';
 import {reviewPrompt, compactFileTree, fileTreeOrder, isGraphSource} from './core.mjs';
 const $ = s => document.querySelector(s);
@@ -127,14 +128,62 @@ function tree() {
   $('#file-count').textContent = files().length;
 }
 const replyLabels = {addressed: 'Addressed', needs_input: 'Needs input', not_changed: 'Not changed', note: 'Note'};
+function messageBody(body) {
+  // Only inline code and bold text are formatted. All user text is escaped.
+  return body.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part, index) => {
+    if (index % 2 === 0) return esc(part);
+    return part.startsWith('`') ? `<code>${esc(part.slice(1,-1))}</code>` : `<strong>${esc(part.slice(2,-2))}</strong>`;
+  }).join('');
+}
+function messageCard({author, kind, body, createdAt, status}, context = '', controls = '') {
+  const agent = kind === 'agent';
+  const time = createdAt ? `<time datetime="${esc(createdAt)}">${esc(new Date(createdAt).toLocaleString())}</time>` : '';
+  return `<article class="comment-bubble ${agent ? 'agent-reply' : 'reviewer-message'}">
+    <div class="thread-head"><strong class="author-name">${esc(author)}</strong>${context}
+      ${status ? `<span class="reply-status">${esc(replyLabels[status] || 'Reply')}</span>` : ''}
+      ${time}<span class="spacer"></span>${controls}</div><p>${messageBody(body)}</p></article>`;
+}
+function lineLabel(c) {
+  return c ? `<span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${esc(c.line)}</span>` : '';
+}
+function laterMessage(message) {
+  return message.createdAt && message.createdAt > activeReview.createdAt;
+}
 function replies(id) {
-  return (activeReview?.replies || []).filter(r => r.commentId === id).map(r => `<div class="agent-reply comment-bubble"><div class="thread-head"><span class="comment-author"><span class="avatar agent-avatar" aria-hidden="true">${esc(r.author.name.slice(0, 1))}</span><span class="author-name">${esc(r.author.name)}</span></span><span class="reply-status">${esc(replyLabels[r.status] || 'Reply')}</span><time datetime="${esc(r.createdAt)}">${esc(new Date(r.createdAt).toLocaleString())}</time></div><p>${esc(r.body)}</p></div>`).join('');
+  const c = activeReview?.comments.find(c => c.id === id);
+  const messages = (activeReview?.replies || []).filter(r => r.commentId === id).map(r => ({...r, author:r.author.name, kind:'agent'}));
+  if (activeReview?.replyTo && (c || id === 'review' && activeReview.instruction)) {
+    messages.push(...activeReview.thread.filter(laterMessage));
+    messages.sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+  }
+  return messages.map(m => messageCard(m, lineLabel(c))).join('');
+}
+function replyControls(id) {
+  if (!submitted || activeReview.outcome !== 'changes_requested' || activeReview.completion) return '';
+  if (replyTarget?.reviewId !== activeReview.id || replyTarget.commentId !== id) {
+    return `<button data-followup="${esc(id)}">Reply</button>`;
+  }
+  return `<form class="inline-reply" aria-label="Reply in thread"><label>Reply<textarea required maxlength="10000" ${sendingReview ? 'readonly' : ''}>${esc(review().drafts['reply:' + id] || '')}</textarea></label>
+    <p class="reply-error" role="status"></p><div class="actions"><button type="button" data-close-reply>Cancel</button><button class="primary" type="submit" ${sendingReview ? 'disabled' : ''}>Send reply</button></div></form>`;
 }
 function thread(c) {
-  const name = session?.author?.name || 'Git author not configured';
-  const words = session?.author?.name?.trim().split(/\s+/u) || [];
-  const initials = words.length ? [words[0], ...(words.length > 1 ? [words.at(-1)] : [])].map(word => Array.from(word)[0]).join('').toLocaleUpperCase() : '?';
-  return `<div data-comment-id="${esc(c.id)}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}"><div class="thread-head"><span class="comment-author"><span class="avatar" aria-hidden="true">${esc(initials)}</span><span class="author-name">${esc(name)}</span></span><span>${c.side === 'old' ? 'Deleted line' : 'Line'} ${c.line} · ${c.resolved ? 'Resolved' : 'Comment'}</span><span class="comment-pending" data-pending="${esc(c.id)}" ${commentPending(c.id)?'':'hidden'}>◷ Pending · Awaiting agent reply</span><span class="spacer"></span>${submitted ? '' : `<button data-edit="${esc(c.id)}">Edit</button>`}<button data-resolve="${esc(c.id)}">${c.resolved ? 'Reopen' : 'Resolve ✓'}</button>${submitted ? '' : `<button data-delete="${esc(c.id)}" aria-label="Delete comment">×</button>`}</div><div class="thread-history">${submitted ? priorMessages() : ''}</div><p class="comment-bubble">${esc(c.body)}</p>${submitted ? `<button data-followup="${esc(c.id)}">Reply</button>` : ''}<div data-replies="${esc(c.id)}" aria-live="polite">${replies(c.id)}</div></div>`;
+  const name = activeReview?.author?.name || session?.author?.name || 'Git author not configured';
+  const id = esc(c.id);
+  const actions = `${submitted ? '' : `<button data-edit="${id}">Edit</button><button data-delete="${id}">Delete</button>`}
+    <button data-resolve="${id}">${c.resolved ? 'Reopen' : 'Resolve'}</button>`;
+  const context = lineLabel(c) + `<span class="comment-pending" data-pending="${id}" ${commentPending(c.id)?'':'hidden'}>Awaiting agent reply</span>`;
+  return `<div data-comment-id="${id}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}">
+    <div class="thread-history">${submitted ? priorMessages(c) : ''}</div>
+    ${messageCard({author:name, body:c.body}, context, actions)}
+    <div data-replies="${id}" aria-live="polite">${replies(c.id)}</div>${replyControls(c.id)}</div>`;
+}
+function renderGeneralThread() {
+  const r = activeReview;
+  const section = $('#general-thread');
+  section.hidden = !r?.instruction;
+  section.innerHTML = r?.instruction ? `<div class="thread-history">${priorMessages()}</div>
+    ${messageCard({author:r.author?.name || 'Reviewer', body:r.instruction})}
+    <div data-replies="review" aria-live="polite">${replies('review')}</div>${replyControls('review')}` : '';
 }
 function syncSubmitted(data) {
   activeReview = data; submitted = true; editor = null; editId = null;
@@ -147,10 +196,7 @@ function syncSubmitted(data) {
   $('#review-status').hidden = false;
   $('#review-status-text').textContent = data.outcome === 'approved' ? 'Review approved.' : data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. You can reply here or start another message.';
   $('#reply-connection').textContent = 'Agent replies update automatically.';
-  $('#general-thread').hidden = !data.instruction;
-  $('#general-history').innerHTML = priorMessages();
-  $('#general-instruction').textContent = data.instruction || '';
-  $('#general-replies').innerHTML = replies('review');
+  renderGeneralThread();
   completionButtons(); startReplies();
 
 }
@@ -165,9 +211,13 @@ function startReplies() {
       const data = await response.json();
       if (activeReview?.id !== data.id) return;
       if (data.completion && !activeReview.completion) { syncSubmitted(data); render(); return; }
-      if (JSON.stringify(data.replies) !== JSON.stringify(activeReview.replies)) {
+      if (JSON.stringify(data.replies) !== JSON.stringify(activeReview.replies) || JSON.stringify(data.thread) !== JSON.stringify(activeReview.thread)) {
         activeReview = data;
         for (const node of document.querySelectorAll('[data-replies]')) node.innerHTML = replies(node.dataset.replies);
+        for (const node of document.querySelectorAll('.thread-history')) {
+          const id = node.closest('.thread').dataset.commentId;
+          node.innerHTML = priorMessages(data.comments.find(c => c.id === id));
+        }
         updatePendingComments();
         if ($('#comment-menu').matches(':popover-open')) renderCommentList();
       }
@@ -178,10 +228,49 @@ function startReplies() {
   }, 1500);
 }
 function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><p class="footnote">Enter to add · Shift+Enter for a new line</p><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
+// Snapshot files are immutable. Reopening a thread should not re-tokenize its diff.
+const highlightedDiffs = new WeakMap();
+function diffCode(file) {
+  if (!highlightedDiffs.has(file)) {
+    const oldPath = file.oldPath || file.path;
+    const before = diffTokenLines(file.lines, 'old', oldPath);
+    const after = diffTokenLines(file.lines, 'new', file.path);
+    const oldLang = sourceLanguage(oldPath), newLang = sourceLanguage(file.path);
+    highlightedDiffs.set(file, file.lines.map((line, i) => line.kind === 'del'
+      ? tokenHtml(line.text, before[i], esc, !!oldLang)
+      : tokenHtml(line.text, after[i], esc, !!newLang)));
+  }
+  return highlightedDiffs.get(file);
+}
 function fileCard(f) {
-  const tokens={old:diffTokens(f.lines,'old',f.path),new:diffTokens(f.lines,'new',f.path)};
-  const r = review(), adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  return `<article class="file-card ${!inGraphMode() && r.done.includes(f.path) && !r.comments.some(c=>c.id===activeCommentId&&c.path===f.path)?'viewed-collapsed':''}" id="${esc(f.id)}"><div class="file-header"><span class="path">⌘ ${esc(f.path)}</span><span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span><div class="spacer"></div><label><input type="checkbox" data-viewed="${esc(f.id)}" ${r.done.includes(f.path) ? 'checked' : ''}>Viewed</label></div>${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${f.lines.map((l, i) => l.kind === 'hunk' ? `<div class="hunk">${esc(l.text)}</div>` : `<div data-usage-file="${esc(f.id)}" data-usage-index="${i}" data-usage-side="${l.kind==='del'?'old':'new'}" class="line ${l.kind}" id="${esc(f.id)}-line-${i}"><button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${esc(f.id)}" data-index="${i}" aria-label="Comment on ${esc(f.path)} ${l.kind === 'del' ? 'old' : 'new'} line ${l.new ?? l.old}">+</button><span class="ln">${l.old ?? ''}</span><span class="ln">${l.new ?? ''}</span><span class="sign">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span><code>${usageLineHtml(l.text,tokens[l.kind==='del'?'old':'new'].filter(t=>t.index===i),esc)}</code></div>${r.comments.filter(c => (!session?.verifying || activeReview?.revision === session.revision) && c.path === f.path && c.index === i).map(thread).join('')}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`).join('')}</div></article>`;
+  const r = review(), id = esc(f.id), code = diffCode(f);
+  const adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
+  const fileComments = r.comments.filter(c => c.path === f.path);
+  const viewed = r.done.includes(f.path);
+  const collapsed = !inGraphMode() && viewed && !fileComments.some(c => c.id === activeCommentId);
+  const commentsByLine = new Map();
+  if (!session.verifying || activeReview?.revision === session.revision) {
+    for (const c of fileComments) {
+      commentsByLine.set(c.index, (commentsByLine.get(c.index) || '') + thread(c));
+    }
+  }
+  const rows = f.lines.map((line, i) => {
+    if (line.kind === 'hunk') return `<div class="hunk">${esc(line.text)}</div>`;
+    const side = line.kind === 'del' ? 'old' : 'new';
+    const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' ';
+    return `<div data-usage-file="${id}" data-usage-index="${i}" data-usage-side="${side}" class="line ${line.kind}" id="${id}-line-${i}">
+      <button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${id}" data-index="${i}"
+        aria-label="Comment on ${esc(f.path)} ${side} line ${line.new ?? line.old}">+</button>
+      <span class="ln">${line.old ?? ''}</span><span class="ln">${line.new ?? ''}</span>
+      <span class="sign">${sign}</span><code>${code[i]}</code></div>
+      ${commentsByLine.get(i) || ''}${editor === lineKey(f.path, i) ? composer(f, i) : ''}`;
+  }).join('');
+  return `<article class="file-card ${collapsed ? 'viewed-collapsed' : ''}" id="${id}">
+    <div class="file-header"><span class="path">⌘ ${esc(f.path)}</span>
+      <span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span>
+      <div class="spacer"></div><label><input type="checkbox" data-viewed="${id}" ${viewed ? 'checked' : ''}>Viewed</label></div>
+    ${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}
+    ${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${rows}</div></article>`;
 }
 function renderFeed() {
   if(diffLoading || !session){$('#feed').innerHTML='<div class="empty" role="status" aria-busy="true">Loading diff…</div>';return;}
@@ -196,7 +285,14 @@ function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttri
 function jump(id) { if(inGraphMode()) { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.followup) openFollowup(b.dataset.followup);
+  if (b.dataset.followup || b.hasAttribute('data-close-reply')) {
+    if (sendingReview) return;
+    const id = b.dataset.followup || replyTarget.commentId;
+    replyTarget = b.dataset.followup ? {reviewId:activeReview.id, commentId:id} : null;
+    renderFeed(); renderGeneralThread();
+    const thread = id === 'review' ? $('#general-thread') : document.querySelector(`[data-comment-id="${CSS.escape(id)}"]`);
+    thread?.querySelector(replyTarget ? 'textarea' : '[data-followup]')?.focus();
+  }
   if (b.dataset.file) { if (document.body.classList.contains('commit-files-open')) setFileDrawer(false, true); jump(b.dataset.file); }
   if (b.dataset.comment) { const f = files().find(f => f.id === b.dataset.comment); editor = lineKey(f.path, +b.dataset.index); editId = null; renderFeed(); $('#comment-body').focus(); }
   if (b.hasAttribute('data-cancel')) { editor = null; editId = null; renderFeed(); }
@@ -276,7 +372,6 @@ async function approveReview() {
     if (!response.ok) {
       if (response.status === 409 && !session.commit) {
         $('#handoff').close();
-        $('#followup').close();
         await navigate(scopeOf(), {compose: '1'});
       }
       throw new Error(result.error);
@@ -286,12 +381,11 @@ async function approveReview() {
     clearInterval(jobTimer);
     clearInterval(clientHeartbeat);
     $('#handoff').close();
-    $('#followup').close();
     $('#review-finished').showModal();
   } catch (error) {
     toast(error.message);
     if ($('#handoff').open) $('#job-state').textContent = error.message;
-    if ($('#followup').open) $('#reply-error').textContent = error.message;
+
   } finally {
     approvingReview = false;
     if (!viewerFinished) render();
@@ -307,12 +401,12 @@ if (local) {
 $('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
-function confirmSubmission(job,outcome){
+function confirmSubmission(job,outcome,replace = true){
  const viewed = [...review().done];
  session.rounds = [...new Set([...(session.rounds || []), job.review.id])];
  session.submittedReview = job.review;
  review().done = viewed;
- setLocation(new URLSearchParams({scope:scopeOf(), round:job.review.id}), true);
+ setLocation(new URLSearchParams({scope:scopeOf(), round:job.review.id}), replace);
  syncSubmitted({...job.review,replies:job.review.replies||[]});render();$('#handoff').close();toast(outcome === 'cancelled' ? 'Review cancelled' : '✓ Review sent');
  $('#job-state').textContent=outcome==='cancelled'?'Review cancelled':'✓ Review sent. Awaiting agent replies.';
  if(job.status==='submitted')return;
@@ -347,6 +441,8 @@ async function send(outcome) {
 }
 $('#send').onclick = () => send('changes_requested'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession(params = viewParams) {
+  replyTarget = null;
+  $('#general-thread').hidden = true;
   const generation = ++loadGeneration;
   diffLoading = true;
   diffLoadFailed = false;
@@ -600,7 +696,7 @@ function renderGraph() {
     detailResizer.ondblclick=()=>{state.graphDetailWidth=setDetailWidth(container.clientWidth*.48);persist();};
   }
   if($('#close-graph-file')) $('#close-graph-file').onclick=()=>{openedNode=null;renderGraph();};
-  if(openedNode){const f=files().find(f=>f.path===openedNode);$('#graph-preview-label').hidden=!!f;$('#graph-file-content').innerHTML=f && f.status !== 'D'?fileCard(f):`<div class="file-header">${esc(openedNode)}${f?.status === 'D' ? ' · Previous version' : ''}</div><pre class="graph-source"><code>${esc(graph.sources[openedNode] ?? 'Source preview unavailable (binary, oversized or unreadable file).')}</code></pre>`;}
+  if(openedNode){const f=files().find(f=>f.path===openedNode);$('#graph-preview-label').hidden=!!f;$('#graph-file-content').innerHTML=f && f.status !== 'D'?fileCard(f):`<div class="file-header">${esc(openedNode)}${f?.status === 'D' ? ' · Previous version' : ''}</div><pre class="graph-source"><code>${graph.sources[openedNode] == null ? 'Source preview unavailable (binary, oversized or unreadable file).' : sourceHtml(graph.sources[openedNode], openedNode, esc)}</code></pre>`;}
   if($('#feed .graph-detail')) $('#feed .graph-detail').scrollTop = detailScroll;
   applyUsageHighlights();
   $('#summary').textContent=`${visible.filter(n=>n.changed).length} changed files · ${visible.filter(n=>!n.changed).length} context files`;
@@ -637,8 +733,8 @@ function completionButtons() {
   $('#round-picker').hidden = !ids.length;
   $('#rounds').innerHTML = ids.map((id, i) => `<option value="${esc(id)}" ${id === activeReview?.id ? 'selected' : ''}>Message ${i + 1}</option>`).join('') + `<option value="" ${!submitted ? 'selected' : ''}>New message</option>`;
 }
-function priorMessages() {
-  return (activeReview?.thread || []).map(message => `<div class="previous-message comment-bubble"><strong>${esc(message.author)}</strong><p>${esc(message.body)}</p></div>`).join('');
+function priorMessages(c) {
+  return (activeReview?.thread || []).filter(m => !laterMessage(m)).map(message => messageCard(message, lineLabel(c))).join('');
 }
 function setLocation(params, replace = false) {
   viewParams = params;
@@ -794,41 +890,57 @@ $('#commit-approve').onclick = async () => {
   } catch (error) { toast(error.message); }
   finally { completionButtons(); }
 };
-function openFollowup(id) {
-  if (!activeReview) return;
-  replyTarget = {reviewId: activeReview.id, commentId:id};
-  const anchor = activeReview.comments.find(c => c.id === id);
-  $('#followup-context').textContent = anchor ? anchor.path + ':' + anchor.line + ' · ' + anchor.body : activeReview.instruction;
-  $('#reply-error').textContent = '';
-  $('#followup textarea').value = review().drafts['reply:' + id] || '';
-  $('#followup').showModal();
-  $('#followup textarea').focus();
-}
-$('#general-followup').onclick = () => openFollowup('review');
-$('#followup-close').onclick = () => $('#followup').close();
-$('#followup textarea').oninput = e => { review().drafts['reply:' + replyTarget.commentId] = e.target.value; persist(); };
-$('#followup form').onsubmit = async e => {
-  e.preventDefault();
-  const message = $('#followup textarea').value.trim();
-  if (!message || sendingReview || approvingReview || approvalQueued || viewerFinished) return;
-  const anchor = activeReview.comments.find(c => c.id === replyTarget.commentId);
-  const payload = {...packet(), replyTo: replyTarget, instruction: anchor ? '' : message,
-    comments: anchor ? [{...anchor, id: crypto.randomUUID(), body:message}] : []};
-  const scope = scopeOf();
+document.addEventListener('input', event => {
+  if (!event.target.matches('.inline-reply textarea')) return;
+  review().drafts['reply:' + replyTarget.commentId] = event.target.value;
+  persist();
+});
+document.addEventListener('submit', async event => {
+  const form = event.target;
+  if (!form.matches('.inline-reply')) return;
+  event.preventDefault();
+  const message = form.querySelector('textarea').value.trim();
+  if (!message || sendingReview || approvingReview || approvalQueued || viewerFinished || !replyTarget) return;
+  const target = replyTarget, draft = review(), generation = loadGeneration;
+  const anchor = activeReview.comments.find(c => c.id === target.commentId);
+  const payload = {...packet(), replyTo:target, instruction:anchor ? '' : message,
+    comments:anchor ? [{...anchor, id:crypto.randomUUID(), body:message}] : []};
+  const params = new URLSearchParams({scope:scopeOf()});
   sendingReview = true;
+  form.querySelector('textarea').readOnly = true;
+  form.querySelector('[type=submit]').disabled = true;
+  let result;
   try {
-    const response = await fetch('/api/reviews?scope=' + encodeURIComponent(scope), {method:'POST',
-      headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload)});
-    const data = await response.json();
-    if (!response.ok) throw Error(data.error);
-    delete review().drafts['reply:' + replyTarget.commentId]; persist();
-    $('#followup').close();
-    const params = new URLSearchParams({scope,round:data.id});
-    setLocation(params);
-    await loadSession(params);
-  } catch (error) { $('#reply-error').textContent = error.message; }
-  finally { sendingReview = false; render(); }
-};
+    const response = await fetch(requestUrl('/api/reviews', params), {method:'POST',
+      headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
+    result = await response.json();
+    if (!response.ok) throw Error(result.error);
+  } catch (error) {
+    let latest;
+    try {
+      latest = (await (await fetch(requestUrl('/api/session', params), {signal:AbortSignal.timeout(5000)})).json()).submittedReview;
+    } catch {}
+    if (latest?.replyTo?.reviewId === target.reviewId && latest.replyTo.commentId === target.commentId && matchesSubmission(latest,payload)) {
+      result = {id:latest.id, review:latest, status:session.agent ? 'running' : 'submitted'};
+    } else {
+      form.querySelector('.reply-error').textContent = error.message;
+      result = null;
+    }
+  }
+  sendingReview = false;
+  if (result) { delete draft.drafts['reply:' + target.commentId]; persist(); }
+  if (generation !== loadGeneration) { render(); return; }
+  if (!result) {
+    form.querySelector('textarea').readOnly = false;
+    form.querySelector('[type=submit]').disabled = false;
+    completionButtons();
+    return;
+  }
+  replyTarget = null;
+  confirmSubmission(result, payload.outcome, false);
+  if (anchor) await showComment(result.review.comments[0].id);
+  else $('#general-thread [data-followup]')?.focus();
+});
 
 const usagesDialog=document.createElement('section');
 usagesDialog.hidden=true;usagesDialog.setAttribute('aria-label','Find Usages in diff');
@@ -841,7 +953,7 @@ function openDiffUsages(target){
  const name=target.dataset.symbol,side=row.dataset.usageSide;
  const results=findDiffUsages(files(),name,side);
  const declaration=primaryDiffDeclaration(results,{path:files().find(f=>f.id===row.dataset.usageFile)?.path,index:+row.dataset.usageIndex});
- const usageButton=(r,i)=>`<button data-usage-result="${i}"><strong>${esc(r.path)}:${r.line??''}</strong><code>${esc(r.text.trim())}</code></button>`;
+ const usageButton=(r,i)=>`<button data-usage-result="${i}"><strong>${esc(r.path)}:${r.line??''}</strong><code>${sourceHtml(r.text.trim(), r.path, esc)}</code></button>`;
  usageSelection={name,side};applyUsageHighlights();
  usagesDialog.innerHTML=`<div class="dialog-head"><h2>Find Usages: ${esc(name)}</h2><button data-close-usages aria-label="Close usages">×</button></div><p class="footnote">${results.length} ${results.length===1?'match':'matches'} in the ${side==='old'?'previous':'current'} side of this diff. Matches use identifier spelling, not resolved symbol identity.</p><section class="usage-declaration" aria-label="Declaration in diff"><h3>Declaration</h3>${declaration?usageButton(declaration,results.indexOf(declaration)):'<p>No declaration found in this diff.</p>'}</section><h3>Usages in diff</h3><div class="usage-results">${results.map((r,i)=>r===declaration?'':usageButton(r,i)).join('')||'<p>No other matches in this diff.</p>'}</div>`;
  usagesDialog.querySelector('[data-close-usages]').onclick=()=>closeDiffUsages();

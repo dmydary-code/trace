@@ -170,14 +170,67 @@ test('Approve in a pending thread preserves an unsent reply when the reviewer ca
  await addComment(page, 'Does the price include shipping?');
  await send(page);
  await page.locator('[data-followup]').click();
- const dialog = page.getByRole('dialog', {name: 'Reply in thread'});
+ const dialog = page.getByRole('form', {name: 'Reply in thread'});
  const reply = dialog.getByRole('textbox');
  await reply.fill('Here is one more question.');
- const approve = dialog.getByRole('button', {name: 'Approve', exact: true});
+ const approve = page.locator('header #approve-review');
  page.once('dialog', prompt => prompt.dismiss());
  await approve.click();
  await expect(reply).toHaveValue('Here is one more question.');
  page.once('dialog', prompt => prompt.accept());
  await approve.click();
  await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
+});
+
+test('inline thread keeps late replies in order and preserves a draft in Graph', async ({page, app, f}) => {
+  await load(page, app);
+  await graph(page);
+  await select(page, f.project.path);
+  const thread = page.locator('#graph-file-content .thread');
+  const messages = thread.locator('.comment-bubble > p');
+  const reply = thread.getByRole('textbox', {name:'Reply'});
+  const first = 'How is the fee calculated?';
+  const second = 'Does the amount include tax?';
+  const third = 'Please document the tax rule.';
+  const answer = 'The fee uses the subtotal.';
+
+  await addComment(page, first);
+  await send(page);
+  const {submittedReview} = await session(app);
+  await thread.getByRole('button', {name:'Reply', exact:true}).click();
+  await reply.fill(second);
+  await thread.getByRole('button', {name:'Send reply'}).click();
+  await expect(messages).toHaveText([first, second]);
+
+  await thread.getByRole('button', {name:'Reply', exact:true}).click();
+  await reply.fill(third);
+  await reply.evaluate(el => el.setSelectionRange(3, 9));
+  const body = join(f.dir, 'agent-reply.txt');
+  await writeFile(body, answer);
+  await f.cli('reply', '--review', submittedReview.id, '--comment', submittedReview.comments[0].id,
+    '--body-file', body, '--agent', 'claude', '--status', 'note');
+  await expect(messages).toHaveText([first, second, answer]);
+  await expect(thread.locator('.agent-reply .author-name')).toHaveText('Claude');
+  await expect(reply).toBeFocused();
+  const accent = () => thread.locator('.agent-reply .author-name').evaluate(el => getComputedStyle(el).color);
+  await expect(reply).toHaveCSS('outline-color', await accent());
+  await expect(reply).toHaveValue(third);
+  expect(await reply.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([3, 9]);
+
+  await thread.getByRole('button', {name:'Cancel'}).click();
+  await page.getByRole('button', {name:'Appearance', exact:true}).click();
+  await page.getByLabel('Color scheme').selectOption('light');
+  await page.keyboard.press('Escape');
+  await thread.getByRole('button', {name:'Reply', exact:true}).click();
+  await expect(reply).toHaveValue(third);
+  await expect(reply).toHaveCSS('outline-color', await accent());
+  await thread.getByRole('button', {name:'Send reply'}).click();
+  await expect(messages).toHaveText([first, second, answer, third]);
+  const current = (await session(app)).submittedReview;
+  const history = [first, second, answer];
+  expect(current.thread.map(m => m.body)).toEqual(history);
+  expect(current.prompt).toContain('Prior conversation: ' + JSON.stringify(current.thread));
+  await page.reload();
+  await select(page, f.project.path);
+  await expect(messages).toHaveText([...history, third]);
 });
