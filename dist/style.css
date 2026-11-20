@@ -1,12 +1,12 @@
-/* Warm neutral surfaces keep syntax colors and the green action accent distinct. */
+/* Dark surfaces, diff rows and syntax colors follow the review reference. */
 :root {
   color-scheme:dark;
-  --bg:#1c1d1a; --panel:#242521; --raised:#2d2e29; --line:#404139;
-  --text:#e9e7df; --muted:#b0afa4; --accent:#a2c898; --accent-ink:#192918;
-  --selected:#303e2e; --add:#242f24; --add-ink:#b9d6ad;
-  --del:#372a29; --del-ink:#e4b4ad; --shadow:#0006;
-  --keyword:#d4b3eb; --string:#b5d69b; --number:#f0bc8f; --function:#a8cbf0;
-  --type:#e3ce92; --comment:#a3a69b;
+  --bg:#0d1117; --panel:#151b23; --raised:#212830; --line:#3d444d;
+  --text:#f0f6fc; --muted:#9198a1; --accent:#3fba50; --accent-ink:#0d1117;
+  --selected:#1f3326; --add:#14261f; --add-ink:#3fba50;
+  --del:#26191c; --del-ink:#f85149; --shadow:#0006;
+  --keyword:#ff7b72; --string:#a5d6ff; --number:#79c0ff; --function:#d1a8ff;
+  --type:#79c0ff; --comment:#9198a1;
 }
 [data-theme=light] {
   color-scheme:light;
@@ -156,6 +156,10 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
   #commit-list a {padding-inline:4px}
   .commit-subject {font-size:12px}
 }
+:root:not([data-theme=light]) #file-sidebar {background-color:var(--bg)}
+:root:not([data-theme=light]) .hunk {background-color:#131d2e}
+:root:not([data-theme=light]) .line.add .ln {background-color:#1f4429;color:var(--text)}
+:root:not([data-theme=light]) .line.del .ln {background-color:#552527;color:var(--text)}
 .line code {color:var(--text)}
 .line.add .sign {color:var(--add-ink)}
 .line.del .sign {color:var(--del-ink)}
