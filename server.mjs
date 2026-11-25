@@ -10,7 +10,7 @@ import {commitTimeline, isCommitId} from './lib/timeline.mjs';
 import {buildGraph} from './lib/graph.mjs';
 import {detectRoutes} from './lib/detect.mjs';
 import {reviewPrompt} from './dist/core.mjs';
-import {conversationTurn, commentId, saveReview, readReview, readSnapshot, reviewDirectory, approveSavedReview} from './lib/reviews.mjs';
+import {conversationTurn, commentId, saveReview, readReview, readDiscussion, readSnapshot, reviewDirectory, approveSavedReview} from './lib/reviews.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 function json(res, status, data) {
@@ -100,6 +100,10 @@ export async function createTraceServer(options = {}) {
       const scope = url.searchParams.get('scope');
       if (scope !== null && scope !== 'changes' && scope !== 'overall' && !isCommitId(scope)) return json(res, 400, {error: 'Invalid comparison'});
       if (req.method === 'GET' && url.pathname === '/api/timeline') return json(res, 200, await timeline.list());
+      if (req.method === 'GET' && url.pathname === '/api/discussions') {
+        const ids = rounds.get(scope) || [];
+        return json(res, 200, await Promise.all(ids.map(id => readDiscussion(repository.gitDir, id))));
+      }
       const mark = url.pathname.match(/^\/api\/commits\/([0-9a-f]+)\/(approve|viewed)$/);
       if (mark && req.method === 'POST') {
         if (req.headers['x-trace-token'] !== token || req.headers.origin !== origin) return json(res, 403, {error: 'Open the review on the local server'});
@@ -114,6 +118,15 @@ export async function createTraceServer(options = {}) {
       const view = {compose: url.searchParams.has('compose'), round: url.searchParams.get('round')};
       if (req.method === 'GET' && url.pathname === '/api/session' && scope) return json(res, 200, await scopeSnapshot(scope, view));
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, await snapshot());
+      if (req.method === 'GET' && url.pathname === '/api/file-context') {
+        const data = scope ? await scopeSnapshot(scope, view) : await snapshot();
+        if (url.searchParams.get('revision') !== data.revision) return json(res, 409, {error:'Diff changed. Refresh before expanding the file.'});
+        const file = data.files.find(entry => entry.id === url.searchParams.get('file'));
+        if (!file || !['M', 'R', 'C'].includes(file.status)) return json(res, 404, {error:'File context is unavailable.'});
+        const text = await repository.baseText(data.baseRevision, file.oldPath || file.path);
+        if (text === null) return json(res, 404, {error:'Text context is unavailable for this file.'});
+        return json(res, 200, {text});
+      }
       if(req.method==='GET' && url.pathname==='/api/graph'){
         const latest = submittedId && url.searchParams.get('view') === 'current';
         let data;
@@ -182,11 +195,15 @@ export async function createTraceServer(options = {}) {
             running = false;
             return json(res, 409, {error: 'Another message was sent. Reload this conversation.'});
           }
-          const parent = input.replyTo;
-          if (parent && (!scope || !ids.includes(parent.reviewId))) throw Error('Unknown reply thread');
-          const current = scope ? await scopeSnapshot(scope, {compose: true, round: parent?.reviewId}) : await snapshot();
-          if (input.revision !== current.revision) { running = false; return json(res, 409, {error: 'Code has changed. Refresh the diff and review your comments.'}); }
           const outcome = input.outcome || 'changes_requested';
+          const parent = input.replyTo;
+          const snapshotId = input.snapshotId;
+          if (parent && (!scope || !ids.includes(parent.reviewId))) throw Error('Unknown reply thread');
+          if (snapshotId !== undefined && (parent || closeViewer || outcome !== 'changes_requested' || !ids.includes(snapshotId))) {
+            throw Error('Invalid saved diff for this review');
+          }
+          const current = scope ? await scopeSnapshot(scope, {compose: true, round: parent?.reviewId ?? snapshotId}) : await snapshot();
+          if (input.revision !== current.revision) { running = false; return json(res, 409, {error: 'Code has changed. Refresh the diff and review your comments.'}); }
           if (closeViewer && outcome !== 'approved') throw new Error('Closing the viewer requires approval');
           if ((scope && outcome === 'approved' && !closeViewer) || !['changes_requested', 'approved', 'cancelled'].includes(outcome)) throw new Error('Invalid review outcome');
           if (!Array.isArray(input.comments) || input.comments.length > 100) throw new Error('Invalid comments');

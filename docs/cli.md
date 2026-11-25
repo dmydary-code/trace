@@ -36,7 +36,7 @@ Both `review` and `open` listen for the whole conversation by default. `--listen
 
 Use `review --once --json` for automation that needs the command to exit after the first submission. Older plugins that pass `--wait` in Codex or Claude still get a continuous listener. Outside an agent session, `--wait` remains an alias for `--once`.
 
-Session hooks tie the viewer to the agent session and detect context clearing. The browser sends heartbeats while it is active. Use `--viewer-idle-timeout SECONDS` to change the default two-minute inactivity limit for a listener or an unbound one-submission viewer. Set `--timeout 0` to wait indefinitely for the first message instead of the default 30 minutes. Exit codes are 0 for completion, 1 for error, 2 for timeout, 3 for cancellation, and 130 for interruption. When recovering feedback, match its `sessionId` to the original viewer.
+Session hooks tie the viewer to the agent session and detect context clearing. The browser sends heartbeats while it is active. Use `--viewer-idle-timeout SECONDS` to change the default two-minute inactivity limit for a listener or an unbound one-submission viewer. Set `--timeout 0` to wait indefinitely for the first message instead of the default five hours. Exit codes are 0 for completion, 1 for error, 2 for timeout, 3 for cancellation, and 130 for interruption. When recovering feedback, match its `sessionId` to the original viewer.
 
 **Working tree** opens the original CLI comparison. **Commits** lists first-parent commits oldest first. An explicit base defines the range. Otherwise Trace uses the common ancestor with the remote default branch (or local main/master) on feature branches. On the default branch it starts with up to 20 recent commits. The starting boundary stays fixed in this viewer. The initial commit compares against the empty tree and merge commits compare against their first parent. **Overall** compares the range baseline with the current working tree, or the index for staged reviews.
 
@@ -98,7 +98,9 @@ In terminal Codex, a sandbox permission prompt may appear when saving the first 
 
 Statuses: `addressed`, `needs_input`, `not_changed`, `note`. These are agent-reported outcomes, not proof that checks passed. The reviewer controls Resolve in the UI. Replies are stored as immutable files, so simultaneous replies cannot overwrite one another. The viewer polls for replies every 1.5 seconds without replacing the diff or moving the reading position.
 
-A follow-up preserves its original line, parent message and previous replies. Choose Review latest changes to discuss newly edited code.
+A follow-up preserves its original line, parent message and previous replies. You can add line comments after sending feedback. Use **Send now** on a draft comment to send it individually and keep the rest of the draft for later. The comment arrows and file dots open threads from earlier messages in the same comparison.
+
+Use **Refresh diff** to see edits on disk and **Back to comment threads** to return to the saved version. The arrows inside each file diff expand unchanged lines.
 
 ## Claude Desktop preview fallback
 

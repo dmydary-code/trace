@@ -77,6 +77,24 @@ export function parseDiff(diff) {
  }
  return files.filter(f=>f.path&&f.lines.length);
 }
+export function diffContextGaps(lines, baseLength) {
+ const gaps = new Map();
+ let old = 1, next = 1;
+ lines.forEach((line, index) => {
+  if (line.kind !== 'hunk') return;
+  const [, fromOld, oldCount = '1', fromNew, newCount = '1'] = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line.text);
+  const startOld = Number(fromOld) + (oldCount === '0' ? 1 : 0);
+  const startNew = Number(fromNew) + (newCount === '0' ? 1 : 0);
+  if (startOld > old) gaps.set(index, {old, next, length:startOld - old});
+  old = startOld + Number(oldCount);
+  next = startNew + Number(newCount);
+ });
+ // Git includes four context lines at the end of a hunk when more text may follow.
+ if (baseLength === undefined ? !lines.length || lines.slice(-4).filter(line => line.kind === 'context').length === 4 : old <= baseLength) {
+  gaps.set(lines.length, {old, next, length:baseLength === undefined ? null : baseLength - old + 1});
+ }
+ return gaps;
+}
 export function reviewPrompt(review) {
  const comments = review.comments.map((c,i)=>`${i+1}. ${c.path}:${c.line} (${c.side==='old'?'deleted line':'new version'})${c.id ? `\nComment ID: ${c.id}` : ''}\nCode: ${JSON.stringify(c.code)}\nFeedback: ${c.body}`).join('\n\n');
  const replies = review.id ? `\n\nReply in every comment thread after handling it. Write what changed, which checks actually ran, and any unresolved issue. Use your own agent name (codex or claude):\ntrace-review reply --review ${review.id} --comment <comment-id> --agent <codex|claude> --status <addressed|needs_input|not_changed> --body-file /path/to/reply.txt\nRun this in the reviewed repository. The body file is plain text. Do not mark a thread resolved; the reviewer decides. For general review instructions, use --comment review. A successful reply command confirms the reply was saved; do not claim delivery if it fails.` : '';

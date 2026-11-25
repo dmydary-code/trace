@@ -175,6 +175,7 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
   margin:4px 0; overflow:hidden; overflow-wrap:anywhere;
   border:1px solid var(--line); border-radius:6px; background:var(--panel);
 }
+.thread :is(.comment-bubble.thread-reply, .inline-reply, [data-followup]) {margin-inline-start:clamp(10px,2vw,16px)}
 .comment-bubble .thread-head {
   padding:5px 12px; gap:8px; min-height:29px;
   background:var(--raised); border-bottom:1px solid var(--line);
@@ -188,6 +189,14 @@ main>.toolbar{position:sticky;top:var(--header-height,67px);z-index:9;background
   border:0; color:var(--muted); font:inherit; padding:2px 4px;
 }
 .thread [data-followup] {font-size:12px;color:var(--accent);margin-block:3px}
+.thread .thread-head [data-send-now] {color:var(--accent)}
+.file-with-comments {display:flex;align-items:center;gap:4px}
+.file-with-comments .file-link {flex:1;min-width:0}
+.file-comment-link {display:grid;place-items:center;flex:0 0 24px;height:24px;padding:0;border:0;background:transparent}
+.file-comment-dot {display:inline-block;flex:0 0 6px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.context-gap {background:var(--raised);border-block:1px solid var(--line)}
+.context-gap button {padding:4px 14px;border:0;background:transparent;color:var(--accent);font-size:11px}
+.context-gap button span {display:inline-block;min-width:14px}
 .thread-head button:hover,.thread [data-followup]:hover {color:var(--text)}
 .inline-reply {padding:10px 0 2px}
 .inline-reply label {font-size:12px;color:var(--muted)}

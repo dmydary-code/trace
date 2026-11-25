@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture, session, post} from '../support/harness.mjs';
+import {fixture, session, post, comment} from '../support/harness.mjs';
 
 async function get(app, path) {
   const response = await fetch(app.url + path);
@@ -87,4 +87,27 @@ test('historical graph and general messages keep the reviewed tree and exact com
   assert.equal(round.commit.sha, sha);
   assert.equal((await get(reopened, '/api/timeline')).commits.length, 2);
   assert.deepEqual((await get(app, '/api/session?scope=overall')).files, []);
+});
+
+test('new comments use the saved diff from their scope while approvals still use the live diff', async t => {
+  const f = await fixture();
+  t.after(() => f.dispose());
+  const app = await f.server();
+  const initial = await get(app, '/api/session?scope=changes');
+  const endpoint = '/api/reviews?scope=changes';
+  const first = await post(app, initial, endpoint, {instruction:'Check this version.'});
+  assert.equal(first.status, 201);
+  const {id} = await first.json();
+  await f.put(f.project.path, f.project.fixed);
+  const feedback = {previousId:id, snapshotId:id, comments:[comment(initial, f.project.path)]};
+
+  assert.equal((await post(app, initial, '/api/reviews?scope=overall', {...feedback, previousId:null})).status, 400);
+  assert.equal((await post(app, initial, endpoint, {previousId:id, outcome:'approved', closeViewer:true})).status, 409);
+  assert.equal((await post(app, initial, endpoint, {previousId:id, snapshotId:id, outcome:'approved', closeViewer:true})).status, 400);
+  const next = await post(app, initial, endpoint, feedback);
+  assert.equal(next.status, 201);
+  const saved = (await next.json()).review;
+  assert.equal(saved.previousId, id);
+  assert.equal(saved.revision, initial.revision);
+  assert.equal(saved.comments[0].code, initial.files.find(file => file.path === f.project.path).lines[feedback.comments[0].index].text);
 });

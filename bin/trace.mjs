@@ -17,6 +17,7 @@ import {readReview, readSnapshot, addReply, reviewDirectory} from '../lib/review
 const root = process.env.TRACE_BUNDLE_HOME || dirname(dirname(fileURLToPath(import.meta.url)));
 const {version} = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const exec = promisify(execFile);
+const defaultReviewTimeoutSeconds = 5 * 60 * 60;
 const usage = `Trace ${version} — local code review for your current agent
 
 Usage: trace-review [review] [options]
@@ -42,7 +43,7 @@ Review options:
   --json            Print newline-delimited JSON events
   --no-open         Print URL without opening a browser
   --port NUMBER     Loopback port (default: assigned automatically)
-  --timeout SECONDS Waiting limit (default: 1800, 0 disables)
+  --timeout SECONDS Waiting limit (default: ${defaultReviewTimeoutSeconds}, 0 disables)
   --agent codex     Start a separate Codex process instead of returning feedback
   --review ID       Saved review ID for feedback, reply, or open
   --comment ID      Comment ID to reply to (or review for general instructions)
@@ -54,7 +55,7 @@ Review options:
 `;
 const args = process.argv.slice(2);
 const command = args[0] && !args[0].startsWith('-') ? args.shift() : 'review';
-const options = {repo: process.cwd(), port: 0, timeout: command === 'pending' ? 25 : 1800};
+const options = {repo: process.cwd(), port: 0, timeout: command === 'pending' ? 25 : defaultReviewTimeoutSeconds};
 let target;
 try {
   if (command === 'install') target = args.shift();

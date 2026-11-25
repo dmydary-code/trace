@@ -8,8 +8,14 @@ test('N-01 loading precedes valid diff and valid empty state',async({page,app})=
 test('D-05/N-01 clean repository shows empty reason only after loading',async({page,app,f})=>{
  await f.git('reset','--hard','HEAD');await page.goto(app.url);await expect(page.locator('#feed')).toContainText('No changes against');await expect(page.locator('#feed')).toContainText(f.repo);await expect(page.locator('.file-card')).toHaveCount(0);
 });
-test('N-02 initial connection failure gives error and retry recovers',async({page,app})=>{
- await page.route('**/api/session',route=>route.abort());await page.goto(app.url);await expect(page.locator('#feed')).toContainText('Start');await expect(page.locator('#feed')).not.toContainText('No changes to display');await page.unroute('**/api/session');await page.reload();await expect(page.locator('.file-card')).toBeVisible();
+test('N-02 initial connection failure can be retried from the toolbar', async ({page, app}) => {
+ await page.route('**/api/session', route => route.abort());
+ await page.goto(app.url);
+ await expect(page.locator('#feed')).toContainText('Start');
+ await expect(page.locator('#feed')).not.toContainText('No changes to display');
+ await page.unroute('**/api/session');
+ await page.getByRole('button', {name:'Refresh diff'}).click();
+ await expect(page.locator('.file-card')).toBeVisible();
 });
 test('D-12/N-03 stale submission retains feedback and reports failure',async({page,app,f})=>{
  await load(page,app);await addComment(page,'Keep my feedback');await f.put(f.project.path,f.project.fixed);await page.locator('#review').click();await page.locator('#send').click();await expect(page.locator('#handoff')).toBeVisible();await expect(page.locator('#review-list')).toContainText('Keep my feedback');await expect(page.locator('#toast')).toContainText('not sent');expect((await session(app)).submittedReview).toBeUndefined();
@@ -31,6 +37,29 @@ test('N-01/G-16 delayed old Graph result cannot overwrite refreshed diff',async(
 test('N-08 public internet outage does not break local review assets or Graph',async({page,app})=>{
  const external=[];await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin!==app.url){external.push(url.origin);return route.abort();}return route.continue();});await load(page,app);await graph(page);await select(page,'src/pricing.ts');await addComment(page,'Works without public internet');await send(page);await expect(page.locator('.file-card .thread')).toContainText('Works without public internet');expect(external).toEqual([]);
 });
-test('D-14 unchanged latest diff gives explanation; a real edit updates the patch',async({page,app,f})=>{
- await load(page,app);await addComment(page,'Check shipping');await send(page);await page.locator('#verify-latest').click();await expect(page.locator('#toast')).toContainText('latest changes');await page.locator('#verify-latest').click();await expect(page.locator('#toast')).toContainText('No new changes');await f.put(f.project.path,f.project.fixed);await page.locator('#verify-latest').click();await expect(page.locator('#feed')).toContainText('+ cart.shipping');
+test('D-14 refreshing picks up external edits in the same viewer and preserves submitted threads', async ({page, app, f}) => {
+ await load(page, app);
+ await page.getByRole('button', {name:'Overall', exact:true}).click();
+ await expect(page.locator('#title')).toHaveText('Overall changes');
+ const refresh = page.getByRole('button', {name:'Refresh diff'});
+ const loadedAt = await page.evaluate(() => performance.timeOrigin);
+ await refresh.click();
+ await expect(page.locator('#toast')).toContainText('No new changes');
+ await addComment(page, 'Check shipping');
+ await send(page);
+
+ await f.put(f.project.path, f.project.fixed);
+ await refresh.click();
+ await expect(page.locator('#feed')).toContainText('+ cart.shipping');
+ await expect(page).toHaveURL(/scope=overall&compose=1$/);
+ await expect(page.locator('#toast')).toContainText('Showing latest changes');
+ await refresh.click();
+ await expect(page.locator('#toast')).toContainText('No new changes');
+
+ await page.getByRole('button', {name:'Back to comment threads'}).click();
+ await expect(page.locator('.file-card .thread')).toContainText('Check shipping');
+ await expect(page.locator('#feed')).not.toContainText('+ cart.shipping');
+ await expect(page).toHaveURL(/scope=overall$/);
+ expect(await page.evaluate(() => performance.timeOrigin)).toBe(loadedAt);
+ expect((await session(app)).sessionId).toBe(app.sessionId);
 });

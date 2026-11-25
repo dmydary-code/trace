@@ -1,7 +1,7 @@
 import {sourceLanguage, tokenHtml, sourceHtml} from './syntax.mjs';
 import {diffTokenLines, findDiffUsages, primaryDiffDeclaration} from './usages.mjs';
 import {stableGraphLayout, revealGraphPath, fileCommentCount, routeGraphEdges, graphZoom} from './graph-layout.mjs';
-import {reviewPrompt, compactFileTree, fileTreeOrder, isGraphSource} from './core.mjs';
+import {reviewPrompt, compactFileTree, fileTreeOrder, isGraphSource, diffContextGaps} from './core.mjs';
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('trace-v3') || '{}'); } catch {}
@@ -22,9 +22,16 @@ let diffLoading=false, graphLoading=null, graphError=null;
 let approvalQueued = false, approvingReview = false, viewerFinished = false, diffLoadFailed = false;
 let usageSelection=null, sendingCommentIds=new Set(), sendingReview=false;
 let session = null, query = '', activePath = '', editor = null, editId = null, jobTimer = null, submitted = false, activeReview = null, replyTimer = null;
-const emptyReview = {comments: [], done: [], drafts: {}, instruction: ''};
+let discussionScope = '', discussionRounds = [], discussionRequest = null;
+const discussionKey = () => session ? session.sessionId + ':' + scopeOf() : '';
+const emptyFeedback = {comments: [], drafts: {}, instruction: ''};
+const emptyReview = {...emptyFeedback, done: []};
 const key = () => session ? `${session.repositoryId}:${scopeOf()}:${session.submittedReview?.id || ('draft-' + (session.rounds?.at(-1) || 'first'))}:${session.verifying && activeReview ? activeReview.revision : session.revision}` : 'disconnected';
 const review = () => state.reviews[key()] ??= structuredClone(emptyReview);
+const draftReview = () => submitted ? (review().nextMessage ??= structuredClone(emptyFeedback)) : review();
+const displayedComments = () => submitted ? [...review().comments, ...draftReview().comments] : review().comments;
+const hasDraftFeedback = () => draftReview().comments.some(c => !c.resolved) || !!draftReview().instruction.trim();
+const readingSentReview = () => submitted && !hasDraftFeedback();
 const files = () => session?.files || [];
 let graphAvailable = false;
 function inGraphMode() {
@@ -118,12 +125,27 @@ function layerIcon(layer) {
 }
 const lineKey = (path, index) => `${path}:${index}`;
 function tree() {
-  const fileLink = (f, label) => `<button class="file-link ${f.path === activePath ? 'active' : ''}" data-file="${esc(f.id)}" title="${esc(f.path)}">${icon('file')}<span class="name">${esc(label)}</span><span class="status">${review().done.includes(f.path) ? '✓' : esc(f.status || 'M')}</span></button>`;
+  const firstThread = new Map();
+  for (const comment of orderedComments()) {
+    const first = firstThread.get(comment.path);
+    if (!first || (!first.replyCount && comment.replyCount)) firstThread.set(comment.path, comment);
+  }
+  const paths = new Set(files().map(f => f.path));
+  const threadedFiles = [...firstThread.keys()].filter(path => !paths.has(path)).map(path => ({path}));
+  const fileLink = (f, label) => {
+    const id = firstThread.get(f.path)?.id;
+    const action = f.id ? `data-file="${esc(f.id)}"` : `data-open-thread="${esc(id)}"`;
+    const link = `<button class="file-link ${f.path === activePath ? 'active' : ''}" ${action} title="${esc(f.path)}">${icon('file')}<span class="name">${esc(label)}</span><span class="status">${review().done.includes(f.path) ? '✓' : esc(f.status || '')}</span>${!f.id ? '<span class="file-comment-dot" aria-label="Has comments"></span>' : ''}</button>`;
+    if (!f.id || !id) return link;
+    const name = esc('Open comments in ' + f.path);
+    return `<div class="file-with-comments">${link}<button class="file-comment-link" data-open-thread="${esc(id)}" aria-label="${name}" title="${name}"><span class="file-comment-dot" aria-hidden="true"></span></button></div>`;
+  };
   $('#sidebar-heading').textContent = 'Changed files';
   {
     const root = compactFileTree(files().filter(f => f.path.toLowerCase().includes(query)));
     const branch = nodes => nodes.map(node => node.children ? `<details open><summary title="${esc(node.name)}">${esc(node.name)}</summary><div>${branch(node.children)}</div></details>` : fileLink(node.file, node.name)).join('');
-    $('#tree').innerHTML = branch(root) || '<p>No matching files</p>';
+    const history = threadedFiles.filter(f => f.path.toLowerCase().includes(query)).map(f => fileLink(f, f.path)).join('');
+    $('#tree').innerHTML = (branch(root) + history) || '<p>No matching files</p>';
   }
   $('#file-count').textContent = files().length;
 }
@@ -135,10 +157,10 @@ function messageBody(body) {
     return part.startsWith('`') ? `<code>${esc(part.slice(1,-1))}</code>` : `<strong>${esc(part.slice(2,-2))}</strong>`;
   }).join('');
 }
-function messageCard({author, kind, body, createdAt, status}, context = '', controls = '') {
+function messageCard({author, kind, body, createdAt, status}, context = '', controls = '', nested = false) {
   const agent = kind === 'agent';
   const time = createdAt ? `<time datetime="${esc(createdAt)}">${esc(new Date(createdAt).toLocaleString())}</time>` : '';
-  return `<article class="comment-bubble ${agent ? 'agent-reply' : 'reviewer-message'}">
+  return `<article class="comment-bubble ${agent ? 'agent-reply' : 'reviewer-message'}${nested ? ' thread-reply' : ''}">
     <div class="thread-head"><strong class="author-name">${esc(author)}</strong>${context}
       ${status ? `<span class="reply-status">${esc(replyLabels[status] || 'Reply')}</span>` : ''}
       ${time}<span class="spacer"></span>${controls}</div><p>${messageBody(body)}</p></article>`;
@@ -156,7 +178,7 @@ function replies(id) {
     messages.push(...activeReview.thread.filter(laterMessage));
     messages.sort((a,b) => a.createdAt.localeCompare(b.createdAt));
   }
-  return messages.map(m => messageCard(m, lineLabel(c))).join('');
+  return messages.map(m => messageCard(m, lineLabel(c), '', true)).join('');
 }
 function replyControls(id) {
   if (!submitted || activeReview.outcome !== 'changes_requested' || activeReview.completion) return '';
@@ -166,23 +188,26 @@ function replyControls(id) {
   return `<form class="inline-reply" aria-label="Reply in thread"><label>Reply<textarea required maxlength="10000" ${sendingReview ? 'readonly' : ''}>${esc(review().drafts['reply:' + id] || '')}</textarea></label>
     <p class="reply-error" role="status"></p><div class="actions"><button type="button" data-close-reply>Cancel</button><button class="primary" type="submit" ${sendingReview ? 'disabled' : ''}>Send reply</button></div></form>`;
 }
-function thread(c) {
+function thread(c, draft) {
   const name = activeReview?.author?.name || session?.author?.name || 'Git author not configured';
   const id = esc(c.id);
-  const actions = `${submitted ? '' : `<button data-edit="${id}">Edit</button><button data-delete="${id}">Delete</button>`}
-    <button data-resolve="${id}">${c.resolved ? 'Reopen' : 'Resolve'}</button>`;
-  const context = lineLabel(c) + `<span class="comment-pending" data-pending="${id}" ${commentPending(c.id)?'':'hidden'}>Awaiting agent reply</span>`;
+  const locked = sendingCommentIds.has(c.id) ? 'disabled' : '';
+  const sendDisabled = c.resolved || editId === c.id || sendingReview || jobTimer || approvingReview || approvalQueued;
+  const actions = `${draft ? `<button data-send-now="${id}" ${sendDisabled ? 'disabled' : ''}>Send now</button><button data-edit="${id}" ${locked}>Edit</button><button data-delete="${id}" ${locked}>Delete</button>` : ''}
+    <button data-resolve="${id}" ${locked}>${c.resolved ? 'Reopen' : 'Resolve'}</button>`;
+  const context = lineLabel(c) + (draft && submitted ? '<span>Draft</span>' : '')
+    + `<span class="comment-pending" data-pending="${id}" ${commentPending(c.id)?'':'hidden'}>Awaiting agent reply</span>`;
   return `<div data-comment-id="${id}" tabindex="-1" class="thread ${activeCommentId===c.id?'comment-current':''} ${c.resolved ? 'resolved' : ''}">
-    <div class="thread-history">${submitted ? priorMessages(c) : ''}</div>
-    ${messageCard({author:name, body:c.body}, context, actions)}
-    <div data-replies="${id}" aria-live="polite">${replies(c.id)}</div>${replyControls(c.id)}</div>`;
+    ${draft ? '' : `<div class="thread-history">${priorMessages(c)}</div>`}
+    ${messageCard({author:name, body:c.body}, context, actions, !draft && !!activeReview?.replyTo)}
+    ${draft ? '' : `<div data-replies="${id}" aria-live="polite">${replies(c.id)}</div>${replyControls(c.id)}`}</div>`;
 }
 function renderGeneralThread() {
   const r = activeReview;
   const section = $('#general-thread');
   section.hidden = !r?.instruction;
   section.innerHTML = r?.instruction ? `<div class="thread-history">${priorMessages()}</div>
-    ${messageCard({author:r.author?.name || 'Reviewer', body:r.instruction})}
+    ${messageCard({author:r.author?.name || 'Reviewer', body:r.instruction}, '', '', !!r.replyTo)}
     <div data-replies="review" aria-live="polite">${replies('review')}</div>${replyControls('review')}` : '';
 }
 function syncSubmitted(data) {
@@ -192,18 +217,20 @@ function syncSubmitted(data) {
   review().comments = [...data.comments.map(c => ({...c, resolved: previous.get(c.id)?.resolved || false})), ...review().comments.filter(c => !sentIds.has(c.id))];
   persist();
   $('#instruction').disabled = true;
-  $('#refresh').hidden = true;
   $('#review-status').hidden = false;
-  $('#review-status-text').textContent = data.outcome === 'approved' ? 'Review approved.' : data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. You can reply here or start another message.';
+  $('#review-status-text').textContent = data.outcome === 'approved' ? 'Review approved.' : data.outcome === 'cancelled' ? 'Review cancelled.' : 'Review submitted. Add more line comments or reply in a thread.';
   $('#reply-connection').textContent = 'Agent replies update automatically.';
   renderGeneralThread();
-  completionButtons(); startReplies();
+  completionButtons();
 
 }
 function startReplies() {
   clearInterval(replyTimer);
-  if (!activeReview || activeReview.outcome !== 'changes_requested' || activeReview.completion) return;
+  if (!session?.rounds?.length) return;
+  void refreshDiscussions();
   replyTimer = setInterval(async () => {
+    void refreshDiscussions();
+    if (!activeReview || activeReview.outcome !== 'changes_requested' || activeReview.completion) return;
     try {
       const watching = activeReview;
       const response = await fetch('/api/reviews/' + watching.id);
@@ -219,6 +246,7 @@ function startReplies() {
           node.innerHTML = priorMessages(data.comments.find(c => c.id === id));
         }
         updatePendingComments();
+        updateCommentNavigation();
         if ($('#comment-menu').matches(':popover-open')) renderCommentList();
       }
       $('#reply-connection').textContent = 'Agent replies update automatically. Statuses are reported by the agent; resolve threads after checking the fix.';
@@ -227,9 +255,77 @@ function startReplies() {
     }
   }, 1500);
 }
-function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(review().drafts[lineKey(f.path, index)] || '')}</textarea><p class="footnote">Enter to add · Shift+Enter for a new line</p><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
+async function refreshDiscussions() {
+  const key = discussionKey();
+  if (discussionRequest?.key === key) return;
+  const request = {key};
+  discussionRequest = request;
+  try {
+    const params = new URLSearchParams({scope:scopeOf()});
+    const response = await fetch(requestUrl('/api/discussions', params), {signal:AbortSignal.timeout(5000)});
+    if (!response.ok) return;
+    const rounds = await response.json();
+    if (discussionRequest !== request || discussionKey() !== key || viewerFinished) return;
+    if (discussionScope === key && JSON.stringify(rounds) === JSON.stringify(discussionRounds)) return;
+    discussionScope = key;
+    discussionRounds = rounds;
+    tree();
+    updateCommentNavigation();
+    if ($('#comment-menu').matches(':popover-open')) renderCommentList();
+  } catch {} finally {
+    if (discussionRequest === request) discussionRequest = null;
+  }
+}
+function composer(f, index) { const l = f.lines[index]; return `<form class="composer" data-editor-file="${esc(f.id)}" data-index="${index}"><label for="comment-body">${esc(f.path)} · ${l.kind === 'del' ? 'deleted line' : 'line'} ${l.new ?? l.old}</label><textarea id="comment-body" required maxlength="10000" placeholder="Describe what should change…">${esc(draftReview().drafts[lineKey(f.path, index)] || '')}</textarea><p class="footnote">Enter to add · Shift+Enter for a new line</p><div class="actions"><button type="button" data-cancel>Cancel</button><button class="primary" type="submit">${editId ? 'Save' : 'Add to review'}</button></div></form>`; }
 // Snapshot files are immutable. Reopening a thread should not re-tokenize its diff.
 const highlightedDiffs = new WeakMap();
+const fileContexts = new WeakMap();
+function fileContext(file) {
+  if (!fileContexts.has(file)) fileContexts.set(file, {expanded:new Set(), markup:new Map()});
+  return fileContexts.get(file);
+}
+function contextMarkup(file, index, gap, context) {
+  if (!gap) return '';
+  const open = context.expanded.has(index);
+  const arrow = index === file.lines.length ? '↓' : gap.old === 1 ? '↑' : '↕';
+  const label = open ? 'Hide unchanged lines' : gap.length ? `Show ${gap.length} unchanged lines` : 'Show more unchanged lines';
+  const button = `<div class="context-gap"><button data-context-file="${esc(file.id)}" data-context-index="${index}" ${context.loading ? 'disabled' : ''} aria-expanded="${open}"><span aria-hidden="true">${open ? '−' : arrow}</span> ${context.loading ? 'Loading unchanged lines…' : label}</button></div>`;
+  if (!open) return button;
+  if (!context.markup.has(index)) {
+    const lines = context.lines.slice(gap.old - 1, gap.old - 1 + gap.length);
+    const code = sourceHtml(lines.join('\n'), file.oldPath || file.path, esc).split('\n');
+    context.markup.set(index, lines.map((_, i) => `<div class="line context expanded-context"><span></span><span class="ln">${gap.old + i}</span><span class="ln">${gap.next + i}</span><span></span><code>${code[i]}</code></div>`).join(''));
+  }
+  return button + context.markup.get(index);
+}
+async function toggleFileContext(button) {
+  const file = files().find(entry => entry.id === button.dataset.contextFile);
+  if (!file) return;
+  const index = Number(button.dataset.contextIndex), context = fileContext(file);
+  if (context.loading) return;
+  if (context.expanded.delete(index)) { renderFeed(); return; }
+  if (!context.lines) {
+    const current = session;
+    const params = new URLSearchParams(viewParams);
+    params.set('revision', current.revision);
+    params.set('file', file.id);
+    context.loading = true;
+    renderFeed();
+    try {
+      const response = await fetch(requestUrl('/api/file-context', params), {signal:AbortSignal.timeout(10000)});
+      const data = await response.json();
+      if (!response.ok) throw Error(data.error);
+      context.lines = data.text.split('\n');
+      if (context.lines.at(-1) === '') context.lines.pop();
+    } catch (error) {
+      if (session === current) toast(error.message);
+    } finally { context.loading = false; }
+    if (session !== current) return;
+  }
+  if (context.lines) context.expanded.add(index);
+  renderFeed();
+  $(`[data-context-file="${CSS.escape(file.id)}"][data-context-index="${index}"]`)?.focus({preventScroll:true});
+}
 function diffCode(file) {
   if (!highlightedDiffs.has(file)) {
     const oldPath = file.oldPath || file.path;
@@ -244,22 +340,27 @@ function diffCode(file) {
 }
 function fileCard(f) {
   const r = review(), id = esc(f.id), code = diffCode(f);
+  const canExpand = ['M', 'R', 'C'].includes(f.status) && !f.note?.startsWith('Binary');
+  const context = canExpand ? fileContext(f) : null;
+  const gaps = canExpand ? diffContextGaps(f.lines, context.lines?.length) : new Map();
+  const gapAt = index => contextMarkup(f, index, gaps.get(index), context);
   const adds = f.lines.filter(l => l.kind === 'add').length, dels = f.lines.filter(l => l.kind === 'del').length;
-  const fileComments = r.comments.filter(c => c.path === f.path);
+  const fileComments = displayedComments().filter(c => c.path === f.path);
+  const drafts = new Set(draftReview().comments);
   const viewed = r.done.includes(f.path);
   const collapsed = !inGraphMode() && viewed && !fileComments.some(c => c.id === activeCommentId);
   const commentsByLine = new Map();
   if (!session.verifying || activeReview?.revision === session.revision) {
     for (const c of fileComments) {
-      commentsByLine.set(c.index, (commentsByLine.get(c.index) || '') + thread(c));
+      commentsByLine.set(c.index, (commentsByLine.get(c.index) || '') + thread(c, drafts.has(c)));
     }
   }
   const rows = f.lines.map((line, i) => {
-    if (line.kind === 'hunk') return `<div class="hunk">${esc(line.text)}</div>`;
+    if (line.kind === 'hunk') return gapAt(i) + `<div class="hunk">${esc(line.text)}</div>`;
     const side = line.kind === 'del' ? 'old' : 'new';
     const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' ';
     return `<div data-usage-file="${id}" data-usage-index="${i}" data-usage-side="${side}" class="line ${line.kind}" id="${id}-line-${i}">
-      <button class="comment-trigger" ${submitted ? 'disabled' : ''} data-comment="${id}" data-index="${i}"
+      <button class="comment-trigger" data-comment="${id}" data-index="${i}"
         aria-label="Comment on ${esc(f.path)} ${side} line ${line.new ?? line.old}">+</button>
       <span class="ln">${line.old ?? ''}</span><span class="ln">${line.new ?? ''}</span>
       <span class="sign">${sign}</span><code>${code[i]}</code></div>
@@ -270,7 +371,7 @@ function fileCard(f) {
       <span class="stats"><span class="plus">+${adds}</span> <span class="minus">−${dels}</span></span>
       <div class="spacer"></div><label><input type="checkbox" data-viewed="${id}" ${viewed ? 'checked' : ''}>Viewed</label></div>
     ${f.oldPath ? `<div class="hunk">Renamed from ${esc(f.oldPath)}</div>` : ''}
-    ${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${rows}</div></article>`;
+    ${f.note ? `<div class="hunk">${esc(f.note)}</div>` : ''}<div class="diff">${rows}${gapAt(f.lines.length)}</div></article>`;
 }
 function renderFeed() {
   if(diffLoading || !session){$('#feed').innerHTML='<div class="empty" role="status" aria-busy="true">Loading diff…</div>';return;}
@@ -280,11 +381,24 @@ function renderFeed() {
   applyUsageHighlights();
   $('#summary').textContent = `${list.length} files · +${list.flatMap(f => f.lines).filter(l => l.kind === 'add').length} −${list.flatMap(f => f.lines).filter(l => l.kind === 'del').length}`;
 }
-function counts() { updateCommentNavigation(); $('#review-count').textContent = review().comments.filter(c => !c.resolved).length; $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`; $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%'; }
-function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', !inGraphMode()); $('#route-mode').setAttribute('aria-pressed', inGraphMode()); $('#route-info').hidden = true; $('#review').disabled = !session || diffLoading || sendingReview || approvingReview; $('#review').setAttribute('aria-busy',String(sendingReview)); $('#review-label').textContent=sendingReview?'Sending…':submitted?'Review sent':'Send to agent'; $('#review-icon').textContent=submitted?'✓':'↗'; tree(); renderFeed(); counts(); completionButtons(); }
+function counts() {
+  updateCommentNavigation();
+  const sent = readingSentReview();
+  $('#review').disabled = !session || diffLoading || sendingReview || approvingReview;
+  $('#review').setAttribute('aria-busy', String(sendingReview));
+  $('#review-label').textContent = sendingReview ? 'Sending…' : sent ? 'Review sent' : 'Send to agent';
+  $('#review-icon').textContent = sent ? '✓' : '↗';
+  $('#review-count').textContent = (sent ? review() : draftReview()).comments.filter(c => !c.resolved).length;
+  $('#progress').textContent = `Viewed ${review().done.length} of ${files().length} files`;
+  $('#progress-bar').style.width = (files().length ? review().done.length / files().length * 100 : 0) + '%';
+}
+function render() { applyTheme(); applySidebarWidth(); $('#files-mode').setAttribute('aria-pressed', !inGraphMode()); $('#route-mode').setAttribute('aria-pressed', inGraphMode()); $('#route-info').hidden = true; tree(); renderFeed(); counts(); completionButtons(); }
 function jump(id) { if(inGraphMode()) { const f=files().find(f=>f.id===id); if(f){selectGraphNode(f.path);} return; } const f = files().find(f => f.id === id); if (!f) return; activePath = f.path; tree(); document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'}); }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.sendNow) { void send('changes_requested', b.dataset.sendNow); return; }
+  if (b.dataset.openThread) { void showComment(b.dataset.openThread); return; }
+  if (b.dataset.contextFile) { void toggleFileContext(b); return; }
   if (b.dataset.followup || b.hasAttribute('data-close-reply')) {
     if (sendingReview) return;
     const id = b.dataset.followup || replyTarget.commentId;
@@ -296,20 +410,21 @@ document.addEventListener('click', e => {
   if (b.dataset.file) { if (document.body.classList.contains('commit-files-open')) setFileDrawer(false, true); jump(b.dataset.file); }
   if (b.dataset.comment) { const f = files().find(f => f.id === b.dataset.comment); editor = lineKey(f.path, +b.dataset.index); editId = null; renderFeed(); $('#comment-body').focus(); }
   if (b.hasAttribute('data-cancel')) { editor = null; editId = null; renderFeed(); }
-  if (b.dataset.resolve) { const c = review().comments.find(c => c.id === b.dataset.resolve); c.resolved = !c.resolved; persist(); renderFeed(); counts(); }
-  if (b.dataset.delete) { review().comments = review().comments.filter(c => c.id !== b.dataset.delete); persist(); renderFeed(); counts(); }
-  if (b.dataset.edit) { const c = review().comments.find(c => c.id === b.dataset.edit); editor = lineKey(c.path, c.index); editId = c.id; review().drafts[editor] = c.body; renderFeed(); $('#comment-body').focus(); }
+  if (b.dataset.resolve) { const c = displayedComments().find(c => c.id === b.dataset.resolve); c.resolved = !c.resolved; persist(); renderFeed(); counts(); }
+  if (b.dataset.delete) { const draft = draftReview(); draft.comments = draft.comments.filter(c => c.id !== b.dataset.delete); persist(); tree(); renderFeed(); counts(); }
+  if (b.dataset.edit) { const draft = draftReview(); const c = draft.comments.find(c => c.id === b.dataset.edit); editor = lineKey(c.path, c.index); editId = c.id; draft.drafts[editor] = c.body; renderFeed(); $('#comment-body').focus(); }
 });
-document.addEventListener('input', e => { if (e.target.id === 'comment-body') { review().drafts[editor] = e.target.value; persist(); } });
+document.addEventListener('input', e => { if (e.target.id === 'comment-body') { draftReview().drafts[editor] = e.target.value; persist(); } });
 document.addEventListener('keydown',e=>{if(e.target.id==='comment-body'&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&!e.repeat){e.preventDefault();e.target.closest('form').requestSubmit();}});
 document.addEventListener('submit', e => {
   const form = e.target.closest('.composer'); if (!form) return; e.preventDefault(); const body = $('#comment-body').value.trim(); if (!body) return;
   const f = files().find(f => f.id === form.dataset.editorFile), index = +form.dataset.index, l = f.lines[index];
-  if (editId) review().comments.find(c => c.id === editId).body = body;
-  else review().comments.push({id: crypto.randomUUID(), path: f.path, index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body, resolved: false});
-  delete review().drafts[editor]; editor = null; editId = null; persist(); renderFeed(); counts(); toast('Comment added to review');
+  const draft = draftReview();
+  if (editId) draft.comments.find(c => c.id === editId).body = body;
+  else draft.comments.push({id: crypto.randomUUID(), path: f.path, index, line: l.new ?? l.old, side: l.kind === 'del' ? 'old' : 'new', code: l.text, body, resolved: false});
+  delete draft.drafts[editor]; editor = null; editId = null; persist(); tree(); renderFeed(); counts(); toast('Comment added to review');
 });
-document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) { review().done.push(path); if (review().comments.some(c => c.id === activeCommentId && c.path === path)) activeCommentId = null; } persist(); tree(); counts(); renderFeed(); } });
+document.addEventListener('change', e => { if (e.target.dataset.viewed) { const path = files().find(f => f.id === e.target.dataset.viewed).path; review().done = review().done.filter(p => p !== path); if (e.target.checked) { review().done.push(path); if (displayedComments().some(c => c.id === activeCommentId && c.path === path)) activeCommentId = null; } persist(); tree(); counts(); renderFeed(); } });
 $('#color-scheme').onchange = e => { state.theme = e.target.value; persist(); applyTheme(); };
 $('#new-year').onchange = e => { state.newYear = e.target.checked; persist(); applyTheme(); };
 $('#search').oninput = e => { query = e.target.value.toLowerCase(); tree(); renderFeed(); };
@@ -328,16 +443,35 @@ document.addEventListener('keydown', e => {
 document.addEventListener('click', e => {
   if (document.body.classList.contains('commit-files-open') && !e.target.closest('#file-sidebar, #toggle-sidebar')) setFileDrawer(false);
 });
-function packet(outcome = 'changes_requested') { return {schemaVersion: 2, repo: session.repo, commit: session.commit, previousId: session.rounds?.at(-1) || null, revision: session.revision, outcome, comments: review().comments.filter(c => !c.resolved), instruction: review().instruction || ''}; }
-function prompt() { const p = packet(); return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : ''); }
-function dialogButtons() { const hasFeedback = !!(packet().comments.length || review().instruction.trim()); $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview || submitted; $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted; $('#copy-prompt').disabled = !hasFeedback; }
+function packet(outcome = 'changes_requested') {
+  const draft = draftReview();
+  return {schemaVersion: 2, repo: session.repo, commit: session.commit, previousId: session.rounds?.at(-1) || null,
+    revision: session.revision, outcome, comments: draft.comments.filter(c => !c.resolved), instruction: draft.instruction};
+}
+function prompt() {
+  if (readingSentReview()) return activeReview.prompt;
+  const p = packet();
+  return reviewPrompt(p) + (p.instruction ? `\n\nAdditional instructions:\n${p.instruction}` : '');
+}
+function dialogButtons() {
+  const hasFeedback = hasDraftFeedback();
+  $('#send').disabled = !hasFeedback || !!jobTimer || sendingReview;
+  $('#cancel-review').disabled = hasFeedback || !!jobTimer || sendingReview || submitted;
+  $('#copy-prompt').disabled = readingSentReview() ? !(activeReview.comments.length || activeReview.instruction) : !hasFeedback;
+}
 function openReview() {
-  const p = submitted&&activeReview?activeReview:packet();
+  const sent = readingSentReview();
+  const p = sent ? activeReview : packet();
   $('#handoff h2').textContent = session.commit ? 'Message on ' + session.commit.sha.slice(0, 8) : 'Message to agent';
   $('#agent-info').textContent = session.agent ? 'Codex will run locally in this repository and apply the requested changes.' : session.handoff === 'waiting-agent' ? 'Your feedback will return to the agent that opened this review.' : 'Feedback is saved locally. Your agent can retrieve it with trace-review feedback --json.';
-  $('#handoff-help').textContent = 'Only open comments from this revision are sent. If the code changes, refresh the diff before submitting.';
+  $('#handoff-help').textContent = submitted && !sent ? 'New comments refer to the revision shown in this review.' : 'Only open comments from this revision are sent. If the code changes, refresh the diff before submitting.';
   $('#review-list').innerHTML = p.comments.map(c => `<div class="review-item"><code>${esc(c.path)}:${c.line} · ${c.side === 'old' ? 'old' : 'new'} version</code><p>${esc(c.body)}</p></div>`).join('') || '<p>Add line comments or describe your requested changes below.</p>';
-  $('#instruction').value = p.instruction||''; $('#instruction').disabled=submitted; $('#send').hidden = submitted; $('#cancel-review').hidden = submitted; if(submitted)$('#job-state').textContent='✓ Review sent. Agent replies appear in the comment threads.';
+  $('#instruction').value = p.instruction || '';
+  $('#instruction').disabled = sent;
+  $('#send').hidden = sent;
+  $('#cancel-review').hidden = submitted;
+  if (sent) $('#job-state').textContent = '✓ Review sent. Agent replies appear in the comment threads.';
+  else if (!jobTimer) $('#job-state').textContent = '';
   $('#send').textContent = session.agent ? 'Send to Codex ↗' : 'Send to agent ↗'; dialogButtons(); $('#handoff').showModal();
 };
 $('#review').onclick = openReview;
@@ -352,9 +486,8 @@ async function approveReview() {
     return;
   }
   approvalQueued = false;
-  const draft = review();
-  const hasDraft = Object.values(draft.drafts).some(text => text.trim())
-    || (!submitted && (draft.comments.some(comment => !comment.resolved) || draft.instruction.trim()));
+  const hasDraft = hasDraftFeedback() || Object.values(draftReview().drafts).some(text => text.trim())
+    || (submitted && Object.values(review().drafts).some(text => text.trim()));
   if (hasDraft && !confirm('Approve and close this review without sending your draft feedback?')) {
     completionButtons();
     return;
@@ -398,46 +531,71 @@ if (local) {
   headerButton.removeAttribute('popovertarget');
   for (const button of document.querySelectorAll('[data-approve-review]')) button.onclick = approveReview;
 }
-$('#instruction').oninput = e => { review().instruction = e.target.value; persist(); dialogButtons(); };
+$('#instruction').oninput = e => { draftReview().instruction = e.target.value; persist(); dialogButtons(); };
 $('#close-dialog').onclick = () => $('#handoff').close();
 $('#copy-prompt').onclick = async () => { try { await navigator.clipboard.writeText(prompt()); toast('Task copied — paste it into your agent chat'); } catch { toast('Clipboard unavailable. Select and copy the review instructions manually.'); } };
-function confirmSubmission(job,outcome,replace = true){
+function confirmSubmission(job, {replace = true, remainingDraft} = {}) {
+ const {outcome} = job.review;
  const viewed = [...review().done];
  session.rounds = [...new Set([...(session.rounds || []), job.review.id])];
  session.submittedReview = job.review;
  review().done = viewed;
+ if (remainingDraft) review().nextMessage = remainingDraft;
  setLocation(new URLSearchParams({scope:scopeOf(), round:job.review.id}), replace);
- syncSubmitted({...job.review,replies:job.review.replies||[]});render();$('#handoff').close();toast(outcome === 'cancelled' ? 'Review cancelled' : '✓ Review sent');
+ syncSubmitted({...job.review,replies:job.review.replies||[]});render();$('#handoff').close();
+ toast(outcome === 'cancelled' ? 'Review cancelled' : remainingDraft ? '✓ Comment sent' : '✓ Review sent');
+ startReplies();
  $('#job-state').textContent=outcome==='cancelled'?'Review cancelled':'✓ Review sent. Awaiting agent replies.';
  if(job.status==='submitted')return;
  jobTimer=setInterval(async()=>{try{
   const response=await fetch('/api/jobs/'+job.id);if(!response.ok)throw Error('Could not retrieve job status');const data=await response.json();
   $('#job-state').textContent=data.status==='running'?'Codex is working…':(data.status==='succeeded'?'Done. Review the latest changes.':'The agent task failed.')+'\n'+data.output;
-  if(data.status!=='running'){clearInterval(jobTimer);jobTimer=null;dialogButtons();}
- }catch(error){clearInterval(jobTimer);jobTimer=null;$('#job-state').textContent=error.message;dialogButtons();}},1500);
+  if(data.status!=='running'){clearInterval(jobTimer);jobTimer=null;dialogButtons();renderFeed();}
+ }catch(error){clearInterval(jobTimer);jobTimer=null;$('#job-state').textContent=error.message;dialogButtons();renderFeed();}},1500);
 }
 function matchesSubmission(review,payload){
- return review&&review.sessionId===session.sessionId&&review.revision===payload.revision&&review.outcome===payload.outcome&&(review.instruction||'')===payload.instruction&&review.comments.length===payload.comments.length&&review.comments.every((c,i)=>c.id===payload.comments[i].id&&c.body===payload.comments[i].body);
+ return review&&review.sessionId===session.sessionId&&review.revision===payload.revision&&review.outcome===payload.outcome&&(review.previousId||null)===payload.previousId&&(review.instruction||'')===payload.instruction&&review.comments.length===payload.comments.length&&review.comments.every((c,i)=>c.id===payload.comments[i].id&&c.body===payload.comments[i].body);
 }
-async function send(outcome) {
- if(sendingReview || submitted || approvingReview || approvalQueued || viewerFinished)return;
- const payload=packet(outcome);let rejected=false;
+async function send(outcome, commentId) {
+ if(diffLoading || sendingReview || jobTimer || approvingReview || approvalQueued || viewerFinished || (submitted && (outcome !== 'changes_requested' || !hasDraftFeedback())))return;
+ const payload=packet(outcome), currentReview=review(), draft=draftReview();
+ if (commentId) {
+  const comment = payload.comments.find(c => c.id === commentId);
+  if (!comment || editId === commentId) return;
+  payload.comments = [comment];
+  payload.instruction = '';
+ }
+ if(submitted) payload.snapshotId=activeReview.id;
+ let rejected=false, accepted;
  sendingReview=true;sendingCommentIds=new Set(payload.comments.map(c=>c.id));
- $('#instruction').disabled=true;render();$('#job-state').textContent='Sending review…';dialogButtons();
+ $('#instruction').disabled=true;render();$('#job-state').textContent=commentId ? 'Sending comment…' : 'Sending review…';dialogButtons();
  try{
   const response=await fetch(requestUrl('/api/reviews',new URLSearchParams({scope:scopeOf()})),{method:'POST',headers:{'Content-Type':'application/json','X-Trace-Token':session.token},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
   rejected=!response.ok;const job=await response.json();if(rejected)throw Error(job.error||'Review could not be submitted');
-  confirmSubmission(job,outcome);
+  accepted=job;
  }catch(error){
   let latest=null;
   try{const response=await fetch(requestUrl('/api/session', new URLSearchParams({scope:scopeOf()})),{signal:AbortSignal.timeout(5000)});if(response.ok)latest=await response.json();}catch{}
   if(matchesSubmission(latest?.submittedReview,payload)){
-   confirmSubmission({id:latest.submittedReview.id,status:session.agent?'running':'submitted',review:latest.submittedReview},outcome);
+   accepted={id:latest.submittedReview.id,status:session.agent?'running':'submitted',review:latest.submittedReview};
   }else{
-   const message=rejected||latest&&!latest.submittedReview?'Review was not sent: '+error.message:'Could not confirm delivery. Reconnect or reload to check the saved review before retrying.';
+   const item = commentId ? 'Comment' : 'Review';
+   const message=rejected||latest&&!latest.submittedReview?item+' was not sent: '+error.message:'Could not confirm delivery. Reconnect or reload to check the saved review before retrying.';
    $('#job-state').textContent=message;toast(message);
   }
- }finally{sendingReview=false;$('#instruction').disabled=submitted;sendingCommentIds.clear();updatePendingComments();render();dialogButtons();}
+ }finally{
+  if(accepted){
+   let remainingDraft;
+   if (commentId) {
+    const {instruction, drafts, comments} = draft;
+    remainingDraft = {instruction, drafts, comments:comments.filter(c => c.id !== commentId)};
+    Object.assign(draft, structuredClone(emptyFeedback));
+   }
+   if(payload.snapshotId) delete currentReview.nextMessage;
+   confirmSubmission(accepted, {remainingDraft});
+  }
+  sendingReview=false;$('#instruction').disabled=readingSentReview();sendingCommentIds.clear();updatePendingComments();render();dialogButtons();
+ }
 }
 $('#send').onclick = () => send('changes_requested'); $('#cancel-review').onclick = () => send('cancelled');
 async function loadSession(params = viewParams) {
@@ -455,6 +613,7 @@ async function loadSession(params = viewParams) {
   }
   graphError=null;
   updateGraphAvailability([]);
+  $('#refresh').disabled = true;
   $('#review').disabled = true;
   $('#commit-approve').disabled = true;
   $('#commit-viewed').disabled = true;
@@ -486,28 +645,35 @@ async function loadSession(params = viewParams) {
     }
     $('#detected').textContent = 'Local dependency graph';
     clearInterval(replyTimer); activeReview = null; submitted = false; $('#instruction').disabled = false; $('#review-status').hidden = true; $('#general-thread').hidden = true;
-    $('#refresh').hidden = false; editor = null; editId = null;
+    editor = null; editId = null;
     if (next.submittedReview) syncSubmitted(next.submittedReview);
     else if (next.rounds?.length) {
       $('#review-status').hidden = false;
       $('#review-status-text').textContent = 'Add a message on this version or return to earlier threads.';
       $('#reply-connection').textContent = '';
     }
-    diffLoading=false;render();
+    diffLoading=false;render();startReplies();
     acknowledgeViewer();clearInterval(clientHeartbeat);clientHeartbeat=setInterval(acknowledgeViewer,session.viewerHeartbeatMs||5000);
+    return next;
   } catch (err) {
     if (generation !== loadGeneration) return;
     diffLoading = false;
     diffLoadFailed = true;
     approvalQueued = false;
     completionButtons();
-    $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.</div>`;
+    const retry = session ? 'Use Refresh diff to try again.' : `Start <code>trace-review</code> in your repository and open the printed URL. If this is Claude Desktop, open this exact URL in your default browser: <code>${esc(location.href)}</code>.`;
+    $('#feed').innerHTML = `<div class="empty">${esc(err.message)}. ${retry}</div>`;
     toast(err.message);
   }
 }
-$('#refresh').onclick = () => {
-  if (session?.commit && !$('#timeline').hidden) openTimeline(false);
-  loadSession();
+$('#refresh').onclick = async () => {
+  if (diffLoading || sendingReview || approvingReview || viewerFinished) return;
+  const previous = session;
+  const reviewingLatest = submitted && !previous.commit;
+  if (previous?.commit && !$('#timeline').hidden) openTimeline(false);
+  const next = reviewingLatest ? await navigate(scopeOf(), {compose:'1'}) : await loadSession();
+  if (!next || next !== session || next.commit) return;
+  toast(reviewingLatest || previous?.revision !== next.revision ? 'Showing latest changes.' : 'No new changes on disk.');
 };
 let selectedNode = null, openedNode = null, revealedNodes = new Set(), expandedNodes = new Set(), graphRevision = null, draggedPositions = new Map(), suppressNodeClickUntil = 0, graphScale = 1;
 function selectGraphNode(path) {
@@ -725,16 +891,18 @@ function completionButtons() {
   $('#working-scope').textContent = session?.comparison === 'staged' ? 'Staged changes' : 'Working tree';
   $('#working-scope').setAttribute('aria-pressed', String(!browsing && scopeOf() === 'changes'));
   $('#overall-scope').setAttribute('aria-pressed', String(!browsing && scopeOf() === 'overall'));
-  const inspectingLatest = viewParams.has('compose') && session?.rounds?.length && !commit;
-  $('#verify-latest').hidden = !submitted && !inspectingLatest;
-  $('#verify-latest').textContent = commit ? 'New message' : inspectingLatest ? 'Refresh latest changes' : 'Review latest changes';
+  const busy = diffLoading || sendingReview || approvingReview || viewerFinished;
+  $('#refresh').hidden = !local;
+  $('#refresh').disabled = busy;
+  $('#new-message').hidden = !submitted || !commit;
+  $('#new-message').disabled = busy;
   $('#back-to-threads').hidden = submitted || !session?.rounds?.length;
   const ids = session?.rounds || [];
   $('#round-picker').hidden = !ids.length;
   $('#rounds').innerHTML = ids.map((id, i) => `<option value="${esc(id)}" ${id === activeReview?.id ? 'selected' : ''}>Message ${i + 1}</option>`).join('') + `<option value="" ${!submitted ? 'selected' : ''}>New message</option>`;
 }
 function priorMessages(c) {
-  return (activeReview?.thread || []).filter(m => !laterMessage(m)).map(message => messageCard(message, lineLabel(c))).join('');
+  return (activeReview?.thread || []).filter(m => !laterMessage(m)).map((message, i) => messageCard(message, lineLabel(c), '', i > 0)).join('');
 }
 function setLocation(params, replace = false) {
   viewParams = params;
@@ -745,8 +913,9 @@ async function navigate(scope, details = {}) {
   approvalQueued = false;
   const params = new URLSearchParams({scope, ...details});
   setLocation(params);
-  await loadSession(params);
+  const next = await loadSession(params);
   window.scrollTo(0, 0);
+  return next;
 }
 window.addEventListener('popstate', () => {
   approvalQueued = false;
@@ -754,13 +923,7 @@ window.addEventListener('popstate', () => {
 });
 $('#working-scope').onclick = () => navigate('changes');
 $('#overall-scope').onclick = () => navigate('overall');
-$('#verify-latest').onclick = async () => {
-  const previous = session;
-  const refreshing = viewParams.has('compose');
-  await navigate(scopeOf(), {compose:'1'});
-  if (session === previous || session.commit) return;
-  toast(refreshing && previous.revision === session.revision ? 'No new changes on disk.' : 'Showing latest changes.');
-};
+$('#new-message').onclick = () => navigate(scopeOf(), {compose:'1'});
 $('#back-to-threads').onclick = () => navigate(scopeOf());
 $('#rounds').onchange = e => navigate(scopeOf(), e.target.value ? {round:e.target.value} : {compose:'1'});
 function hideTimeline() {
@@ -907,6 +1070,8 @@ document.addEventListener('submit', async event => {
     comments:anchor ? [{...anchor, id:crypto.randomUUID(), body:message}] : []};
   const params = new URLSearchParams({scope:scopeOf()});
   sendingReview = true;
+  counts();
+  completionButtons();
   form.querySelector('textarea').readOnly = true;
   form.querySelector('[type=submit]').disabled = true;
   let result;
@@ -933,11 +1098,12 @@ document.addEventListener('submit', async event => {
   if (!result) {
     form.querySelector('textarea').readOnly = false;
     form.querySelector('[type=submit]').disabled = false;
+    counts();
     completionButtons();
     return;
   }
   replyTarget = null;
-  confirmSubmission(result, payload.outcome, false);
+  confirmSubmission(result, {replace:false});
   if (anchor) await showComment(result.review.comments[0].id);
   else $('#general-thread [data-followup]')?.focus();
 });
@@ -990,7 +1156,25 @@ function applyUsageHighlights(){
 }
 
 function navigableComments() {
-  return [...review().comments, ...(submitted ? [] : session?.previousRound?.comments || [])];
+  const rounds = new Map((discussionScope === discussionKey() ? discussionRounds : []).map(round => [round.id, round]));
+  for (const round of [session?.previousRound, activeReview]) if (round) rounds.set(round.id, round);
+  const roots = new Map(), threads = new Map();
+  for (const id of session?.rounds || []) {
+    const round = rounds.get(id);
+    if (!round) continue;
+    const replyCounts = new Map();
+    for (const {commentId} of round.replies) replyCounts.set(commentId, (replyCounts.get(commentId) || 0) + 1);
+    for (const comment of round.comments) {
+      const root = roots.get(round.replyTo?.commentId) || comment.id;
+      const earlier = threads.get(root);
+      const directReplies = replyCounts.get(comment.id) || 0;
+      roots.set(comment.id, root);
+      threads.set(root, {...comment, roundId:id, body:earlier?.body ?? comment.body,
+        replyCount:directReplies + (earlier ? earlier.replyCount + 1 : 0),
+        pending:!directReplies && round.outcome === 'changes_requested' && !round.completed && !round.completion});
+    }
+  }
+  return [...draftReview().comments, ...threads.values()];
 }
 function orderedComments(){
  const order=new Map(fileTreeOrder(files()).map((f,i)=>[f.path,i]));
@@ -1004,8 +1188,8 @@ function updateCommentNavigation(){
 function renderCommentList() {
  const comments = orderedComments();
  $('#comment-links').innerHTML = comments.map(comment => {
-   const count = (activeReview?.replies || session?.previousRound?.replies || []).filter(reply => reply.commentId === comment.id).length;
-   const status = count ? ` · ${count} ${count === 1 ? 'reply' : 'replies'}` : commentPending(comment.id) ? ' · Awaiting reply' : '';
+   const count = comment.replyCount;
+   const status = count ? ` · ${count} ${count === 1 ? 'reply' : 'replies'}` : comment.pending ? ' · Awaiting reply' : '';
    return `<button data-thread-link="${esc(comment.id)}"><small>${esc(comment.path)}:${comment.line}${status}</small><span>${esc(comment.body)}</span></button>`;
  }).join('');
 }
@@ -1016,11 +1200,12 @@ $('#comment-links').onclick = event => {
 };
 async function showComment(id) {
  $('#comment-menu').hidePopover();
- if (!submitted && session.previousRound?.comments.some(comment => comment.id === id)) {
+ const comment = navigableComments().find(entry => entry.id === id);
+ if (comment?.roundId && comment.roundId !== activeReview?.id) {
    state.mode = 'files';
-   await navigate(scopeOf(), {round:session.previousRound.id});
+   if (!await navigate(scopeOf(), {round:comment.roundId})) return;
  }
- const target = review().comments.find(comment => comment.id === id);
+ const target = displayedComments().find(comment => comment.id === id);
  if (!target) return;
  activeCommentId = id;
  activePath = target.path;

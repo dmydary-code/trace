@@ -47,7 +47,7 @@ test('header opens an original thread and its reply after the file changes', asy
  await f.cli('reply','--review',submittedReview.id,'--comment',id,'--agent','codex','--body-file',reply);
  await expect(page.locator('.agent-reply')).toContainText('Shipping included.');
  await f.put(f.project.path,f.project.fixed);
- await page.locator('#verify-latest').click();
+ await page.getByRole('button', {name:'Refresh diff'}).click();
  await expect(page.locator('#back-to-threads')).toBeVisible();
  await page.locator('.graph-comment-badge').click();
  await expect(page.locator('.comment-current')).toContainText('Shipping included.');
@@ -182,6 +182,99 @@ test('Approve in a pending thread preserves an unsent reply when the reviewer ca
  await expect(page.getByRole('heading', {name: 'Review approved'})).toBeVisible();
 });
 
+test('more line comments can be drafted and sent after an agent replies', async ({page, app, f}) => {
+  await load(page, app);
+  await addComment(page, 'Check the shipping fee.');
+  await send(page);
+  const first = (await session(app)).submittedReview;
+  const body = join(f.dir, 'agent-reply.txt');
+  await writeFile(body, 'Shipping is now included.');
+  await f.put(f.project.path, f.project.fixed);
+  await f.cli('reply', '--review', first.id, '--comment', first.comments[0].id,
+    '--body-file', body, '--agent', 'codex');
+  await expect(page.locator('.agent-reply')).toContainText('Shipping is now included.');
+
+  await addComment(page, 'Check the previous calculation too.');
+  await expect(page.locator('.file-card .thread')).toHaveCount(2);
+  await expect(page.locator('.agent-reply')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.file-card .thread')).toHaveCount(2);
+  await page.locator('#review').click();
+  await expect(page.locator('#review-list')).toContainText('Check the previous calculation too.');
+  await expect(page.locator('#review-list')).not.toContainText('Check the shipping fee.');
+  await page.locator('#send').click();
+  await expect(page.locator('#handoff')).not.toBeVisible();
+  const second = (await session(app)).submittedReview;
+  expect(second).toMatchObject({previousId:first.id, revision:first.revision, sessionId:first.sessionId});
+  expect(second.comments.map(c => c.body)).toEqual(['Check the previous calculation too.']);
+  expect(second.comments[0].code).toBe(first.comments[0].code);
+
+  await page.locator('#comment-position').click();
+  await page.locator('#comment-links').getByRole('button', {name:/Check the shipping fee/}).click();
+  await expect(page.locator('.agent-reply')).toContainText('Shipping is now included.');
+  await expect(page.locator('.file-card .thread')).toHaveCount(1);
+  await expect(page.locator('.line.add .comment-trigger').first()).toBeEnabled();
+});
+
+test('Send now delivers one comment, keeps other drafts and links back to answered threads', async ({page, app, f}) => {
+  await load(page, app);
+  await addComment(page, 'Send this comment now.');
+  await addComment(page, 'Keep this comment in the draft.');
+  const immediate = page.locator('.file-card .thread').filter({hasText:'Send this comment now.'});
+  await page.route('**/api/reviews?*', async route => { await route.fetch(); await route.abort(); }, {times:1});
+  await immediate.getByRole('button', {name:'Send now', exact:true}).click();
+  await expect(immediate.getByRole('button', {name:'Reply', exact:true})).toBeVisible();
+  const first = (await session(app)).submittedReview;
+  expect(first.comments.map(c => c.body)).toEqual(['Send this comment now.']);
+
+  await page.reload();
+  await expect(page.locator('.file-card .thread').filter({hasText:'Keep this comment in the draft.'})).toContainText('Draft');
+  const replyPath = join(f.dir, 'immediate-reply.txt');
+  await writeFile(replyPath, 'This is the agent’s answer.');
+  await f.cli('reply', '--review', first.id, '--comment', first.comments[0].id, '--body-file', replyPath, '--agent', 'codex');
+  const reply = immediate.locator('.agent-reply');
+  await expect(reply).toBeVisible();
+  const indent = await reply.evaluate(el => el.getBoundingClientRect().left - el.closest('.thread').querySelector('.reviewer-message').getBoundingClientRect().left);
+  expect(indent).toBeGreaterThanOrEqual(10);
+
+  await send(page);
+  expect((await session(app)).submittedReview.comments.map(c => c.body)).toEqual(['Keep this comment in the draft.']);
+  await page.getByRole('button', {name:'Open comments in ' + first.comments[0].path}).click();
+  await expect(immediate).toBeFocused();
+  await expect(reply).toContainText('This is the agent’s answer.');
+});
+
+test('diff arrows reveal all unchanged lines without moving comment anchors', async ({page, f}) => {
+  const path = 'context.txt';
+  const original = Array.from({length:64}, (_, i) => `Original line ${i + 1}`);
+  const updated = [...original];
+  updated[16] = 'First edited line';
+  updated[44] = 'Second edited line';
+  await f.put(path, original.join('\n') + '\n');
+  await f.git('add', path);
+  await f.git('commit', '-m', 'Add context fixture');
+  await f.put(path, updated.join('\n') + '\n');
+  const app = await f.server({wait:true});
+  await load(page, app);
+  const card = page.locator('.file-card').filter({has:page.getByText('⌘ ' + path, {exact:true})});
+  const gaps = card.getByRole('button', {name:/^Show .*unchanged lines$/});
+  await expect(gaps).toHaveCount(3);
+  for (let expanded = 0; expanded < 3; expanded++) {
+    await gaps.first().click();
+    await expect(card.getByRole('button', {name:'Hide unchanged lines'})).toHaveCount(expanded + 1);
+  }
+  await expect(card.locator('.line:not(.del) code')).toHaveText(updated);
+  await card.getByRole('button', {name:'Comment on context.txt new line 17', exact:true}).click();
+  await page.locator('#comment-body').fill('Review this changed line.');
+  await page.getByRole('button', {name:'Add to review', exact:true}).click();
+  await send(page);
+  expect((await session(app)).submittedReview.comments[0]).toMatchObject({path, line:17, code:updated[16]});
+  await f.put(path, 'The working copy now differs.\n');
+  await page.reload();
+  await gaps.first().click();
+  await expect(card.locator('.expanded-context').first()).toContainText(original[0]);
+});
+
 test('inline thread keeps late replies in order and preserves a draft in Graph', async ({page, app, f}) => {
   await load(page, app);
   await graph(page);
@@ -201,6 +294,8 @@ test('inline thread keeps late replies in order and preserves a draft in Graph',
   await reply.fill(second);
   await thread.getByRole('button', {name:'Send reply'}).click();
   await expect(messages).toHaveText([first, second]);
+  await expect(thread.locator('.reviewer-message').nth(1)).toHaveClass(/thread-reply/);
+  await expect(thread.locator('.reviewer-message').first()).not.toHaveClass(/thread-reply/);
 
   await thread.getByRole('button', {name:'Reply', exact:true}).click();
   await reply.fill(third);
