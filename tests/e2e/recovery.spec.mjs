@@ -42,7 +42,7 @@ test('D-14 refreshing picks up external edits in the same viewer and preserves s
  await page.getByRole('button', {name:'Overall', exact:true}).click();
  await expect(page.locator('#title')).toHaveText('Overall changes');
  const refresh = page.getByRole('button', {name:'Refresh diff'});
- const loadedAt = await page.evaluate(() => performance.timeOrigin);
+ await page.locator('html').evaluate(element => element.setAttribute('data-test-refresh-document', 'original'));
  await refresh.click();
  await expect(page.locator('#toast')).toContainText('No new changes');
  await addComment(page, 'Check shipping');
@@ -60,6 +60,6 @@ test('D-14 refreshing picks up external edits in the same viewer and preserves s
  await expect(page.locator('.file-card .thread')).toContainText('Check shipping');
  await expect(page.locator('#feed')).not.toContainText('+ cart.shipping');
  await expect(page).toHaveURL(/scope=overall$/);
- expect(await page.evaluate(() => performance.timeOrigin)).toBe(loadedAt);
+ await expect(page.locator('html')).toHaveAttribute('data-test-refresh-document', 'original');
  expect((await session(app)).sessionId).toBe(app.sessionId);
 });
