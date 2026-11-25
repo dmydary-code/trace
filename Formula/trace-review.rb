@@ -3,9 +3,9 @@ class TraceReview < Formula
   homepage "https://github.com/dmydary-code/trace"
   license "MIT"
   url "https://github.com/dmydary-code/trace.git",
-      tag: "v0.7.1",
-      revision: "b2b17176010a36c688170b7d856f490bbd520257"
-  version "0.7.1"
+      tag: "v0.8.0",
+      revision: "16aeac1bd3cd8cba32e3d7dd9735e8d2b53ff5c0"
+  version "0.8.0"
 
   depends_on "node@22"
   depends_on "git"
